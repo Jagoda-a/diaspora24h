@@ -1,8 +1,8 @@
 // app/api/ingest/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { slugify } from '@/lib/slug'
-import { fetchFeeds, RS_SOURCES_RS } from '@/lib/rss'
+import { fetchFeeds, RS_SOURCES_RS, resolveBestCover, asProxiedImage } from '@/lib/rss'
 import { aiRewrite } from '@/lib/ai'
 import { classifyTitle } from '@/lib/cats'
 
@@ -17,7 +17,6 @@ type FlatItem = {
   contentHtml?: string
   isoDate?: string
   pubDate?: string
-  enclosureUrl?: string | null
   coverUrl?: string | null
 }
 
@@ -33,49 +32,9 @@ function stripHtml(html?: string | null) {
 
 function pickFirst(arr: (string | undefined | null)[], maxLen = 2000) {
   for (const s of arr) {
-    if (s && s.trim()) {
-      return s.trim().slice(0, maxLen)
-    }
+    if (s && s.trim()) return s.trim().slice(0, maxLen)
   }
   return ''
-}
-
-function containsCyrillic(s: string) {
-  return /[\u0400-\u04FF]/.test(s)
-}
-
-function sanitizeAbsoluteUrl(url?: string | null) {
-  if (!url) return null
-  try {
-    const u = new URL(url)
-    if (!/^https?:$/.test(u.protocol)) return null
-    return u.toString()
-  } catch { return null }
-}
-
-function isImagePath(pathname: string) {
-  return /\.(png|jpe?g|webp|gif|avif)$/i.test(pathname)
-}
-
-function extractImageUrl(html?: string | null) {
-  if (!html) return null
-  const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
-  if (m) {
-    try { return new URL(m[1], 'https://dummy.base').toString() } catch { return sanitizeAbsoluteUrl(m[1]) }
-  }
-  return null
-}
-
-function firstValidCover(urls: (string | null | undefined)[]) {
-  for (const u of urls) {
-    const abs = sanitizeAbsoluteUrl(u || undefined)
-    if (!abs) continue
-    try {
-      const p = new URL(abs).pathname
-      if (isImagePath(p)) return abs
-    } catch {}
-  }
-  return null
 }
 
 function normTitleKey(s?: string | null) {
@@ -86,6 +45,7 @@ function normTitleKey(s?: string | null) {
     .trim()
 }
 
+// nađe jedinstven slug
 async function findUniqueSlug(base: string) {
   let slug = slugify(base)
   if (!slug) slug = 'vest'
@@ -98,6 +58,31 @@ async function findUniqueSlug(base: string) {
   }
 }
 
+// ukloni duplikate rečenica (prosta heuristika)
+function dedupeSentences(text: string): string {
+  const parts = text
+    .split(/([.!?]+)\s+/)
+    .reduce<string[]>((acc, cur, idx, arr) => {
+      if (idx % 2 === 0) {
+        const punct = arr[idx + 1] || ''
+        acc.push((cur + punct).trim())
+      }
+      return acc
+    }, [])
+    .filter(Boolean)
+
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const s of parts) {
+    const key = s.toLowerCase().replace(/\s+/g, ' ').trim()
+    if (key && !seen.has(key)) {
+      seen.add(key)
+      out.push(s)
+    }
+  }
+  return out.join(' ')
+}
+
 async function summarizeFromItem(item: FlatItem) {
   const plainText = pickFirst([stripHtml(item.contentHtml) || item.contentSnippet || ''], 6000)
   const ai = await aiRewrite({
@@ -107,49 +92,31 @@ async function summarizeFromItem(item: FlatItem) {
     country: 'rs',
     sourceName: item.sourceName || 'izvor',
   })
+  ai.content = dedupeSentences(ai.content || '')
+  ai.summary = dedupeSentences(ai.summary || '')
   return ai
 }
 
-/** AUTH: ako je postavljen INGEST_TOKEN, zahtev mora da ima isti u x-ingest-token headeru. */
-function requireTokenOrPass(req: Request): NextResponse | null {
-  const required = process.env.INGEST_TOKEN?.trim()
-  if (!required) {
-    // kompatibilno ponašanje: ako nema env tokena, ne tražimo ga
-    return null
+async function handleIngest(req: NextRequest) {
+  const headerToken = req.headers.get('x-ingest-token') || ''
+  const envToken = process.env.INGEST_TOKEN || ''
+  if (!envToken || headerToken !== envToken) {
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
-  const got = (req.headers.get('x-ingest-token') ?? '').trim()
-  if (got !== required) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-  return null
-}
 
-/** Glavna logika (bivši GET handler) */
-async function runIngest() {
-  // Učitaj feedove
   const feeds = await fetchFeeds(RS_SOURCES_RS)
 
-  // Flat lista
   const allItems: FlatItem[] = []
   for (const f of feeds) {
     const fallbackHost = (() => { try { return new URL(f.url).host } catch { return 'unknown' } })()
     for (const it of f.items as any[]) {
-      const host = (() => {
-        try { return new URL(it.link).hostname } catch { return fallbackHost }
-      })()
+      const host = (() => { try { return new URL(it.link).hostname } catch { return fallbackHost } })()
 
       const contentHtml: string | undefined =
         it['content:encoded'] || it.contentHtml || it.content || undefined
 
-      let fromEnclosure: string | null = null
-      if (it.enclosure?.url) {
-        const type = String(it.enclosure.type || '').toLowerCase()
-        const url = sanitizeAbsoluteUrl(it.enclosure.url)
-        if (url && (type.startsWith('image/') || isImagePath(new URL(url).pathname))) {
-          fromEnclosure = url
-        }
-      }
-      const fromHtml = extractImageUrl(contentHtml || it.contentSnippet)
+      let cover: string | null = await resolveBestCover(it)
+      if (cover) cover = asProxiedImage(cover) // proxy kroz /api/img
 
       allItems.push({
         sourceName: host,
@@ -159,13 +126,12 @@ async function runIngest() {
         contentHtml,
         isoDate: it.isoDate,
         pubDate: it.pubDate,
-        enclosureUrl: fromEnclosure,
-        coverUrl: firstValidCover([fromHtml, fromEnclosure]),
+        coverUrl: cover,
       })
     }
   }
 
-  // Grupisanje po normalizovanom naslovu
+  // grupiši po normalizovanom naslovu (isti događaj sa više izvora)
   const byTitle = new Map<string, FlatItem[]>()
   for (const it of allItems) {
     const key = normTitleKey(it.title)
@@ -179,34 +145,20 @@ async function runIngest() {
   let updated = 0
 
   for (const [, group] of byTitle) {
-    // U ovoj grupi isti naslov (od različitih izvora) — uzmi prvi kao glavni
     const first = group[0]
 
-    // preskoči ako je ćirilicom (ako želiš latinicu samo)
-    if (containsCyrillic(first.title)) continue
-
-    // AI rewrite (nov naslov + meta + content sa kontekstom)
     const ai = await summarizeFromItem(first)
-
-    // kategorija iz redigovanog naslova
     const category = classifyTitle(ai.title, first.link)
+    const coverImage = first.coverUrl || null
 
-    // odredi cover
-    const coverImage = firstValidCover(group.map(i => i.coverUrl))
-
-    // vreme objave
     const publishedAt =
       (first.isoDate ? new Date(first.isoDate) : (first.pubDate ? new Date(first.pubDate) : new Date()))
 
-    // proveri da li već postoji po sourceUrl
+    // već postoji po sourceUrl?
     const byLink = await prisma.article.findFirst({ where: { sourceUrl: first.link } })
     if (byLink) {
       const updates: Record<string, any> = {}
-
-      // dopuni cover ako fali
       if (!byLink.coverImage && coverImage) updates.coverImage = coverImage
-
-      // dopuni summary/content ako fali (ne menjamo slug postojećeg)
       if (!byLink.summary) updates.summary = ai.summary
       if (!byLink.content) updates.content = ai.content
 
@@ -220,7 +172,6 @@ async function runIngest() {
       continue
     }
 
-    // nije postojao — kreiraj sa novim naslovom (i unik slugom)
     const uniqueSlug = await findUniqueSlug(ai.title)
 
     await prisma.article.create({
@@ -241,33 +192,12 @@ async function runIngest() {
     created++
   }
 
-  return { created, updated }
+  return NextResponse.json({ ok: true, created, updated })
 }
 
-/** GET: kompatibilan, ali ako je postavljen INGEST_TOKEN – traži header */
-export async function GET(req: Request) {
-  const authErr = requireTokenOrPass(req)
-  if (authErr) return authErr
-
-  try {
-    const { created, updated } = await runIngest()
-    return NextResponse.json({ ok: true, created, updated })
-  } catch (e) {
-    console.error(e)
-    return NextResponse.json({ ok: false, error: 'Ingest failed' }, { status: 500 })
-  }
+export async function GET(req: NextRequest) {
+  return handleIngest(req)
 }
-
-/** POST: isto kao GET, samo što većina klijenata ovako zove jobove */
-export async function POST(req: Request) {
-  const authErr = requireTokenOrPass(req)
-  if (authErr) return authErr
-
-  try {
-    const { created, updated } = await runIngest()
-    return NextResponse.json({ ok: true, created, updated })
-  } catch (e) {
-    console.error(e)
-    return NextResponse.json({ ok: false, error: 'Ingest failed' }, { status: 500 })
-  }
+export async function POST(req: NextRequest) {
+  return handleIngest(req)
 }
