@@ -52,6 +52,7 @@ function sanitizeAbsoluteUrl(url?: string | null) {
     return u.toString()
   } catch { return null }
 }
+
 function isImagePath(pathname: string) {
   return /\.(png|jpe?g|webp|gif|avif)$/i.test(pathname)
 }
@@ -109,7 +110,22 @@ async function summarizeFromItem(item: FlatItem) {
   return ai
 }
 
-export async function GET() {
+/** AUTH: ako je postavljen INGEST_TOKEN, zahtev mora da ima isti u x-ingest-token headeru. */
+function requireTokenOrPass(req: Request): NextResponse | null {
+  const required = process.env.INGEST_TOKEN?.trim()
+  if (!required) {
+    // kompatibilno ponašanje: ako nema env tokena, ne tražimo ga
+    return null
+  }
+  const got = (req.headers.get('x-ingest-token') ?? '').trim()
+  if (got !== required) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return null
+}
+
+/** Glavna logika (bivši GET handler) */
+async function runIngest() {
   // Učitaj feedove
   const feeds = await fetchFeeds(RS_SOURCES_RS)
 
@@ -225,5 +241,33 @@ export async function GET() {
     created++
   }
 
-  return NextResponse.json({ ok: true, created, updated })
+  return { created, updated }
+}
+
+/** GET: kompatibilan, ali ako je postavljen INGEST_TOKEN – traži header */
+export async function GET(req: Request) {
+  const authErr = requireTokenOrPass(req)
+  if (authErr) return authErr
+
+  try {
+    const { created, updated } = await runIngest()
+    return NextResponse.json({ ok: true, created, updated })
+  } catch (e) {
+    console.error(e)
+    return NextResponse.json({ ok: false, error: 'Ingest failed' }, { status: 500 })
+  }
+}
+
+/** POST: isto kao GET, samo što većina klijenata ovako zove jobove */
+export async function POST(req: Request) {
+  const authErr = requireTokenOrPass(req)
+  if (authErr) return authErr
+
+  try {
+    const { created, updated } = await runIngest()
+    return NextResponse.json({ ok: true, created, updated })
+  } catch (e) {
+    console.error(e)
+    return NextResponse.json({ ok: false, error: 'Ingest failed' }, { status: 500 })
+  }
 }
