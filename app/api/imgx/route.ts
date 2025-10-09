@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 const TIMEOUT_MS = 10_000;
 const MAX_BYTES = 50 * 1024 * 1024;
+const FALLBACK_IMAGE = "/nepoznato.jpg";
 
 function cors() {
   return {
@@ -36,12 +37,14 @@ export async function OPTIONS() {
 export async function GET(req: Request) {
   const { url, w, fmt, q } = parseParams(req);
   if (!isHttpLink(url)) {
-    return NextResponse.json({ ok: false, error: "invalid_url" }, { status: 400, headers: cors() });
+    return NextResponse.redirect(FALLBACK_IMAGE);
   }
 
   let target: URL;
-  try { target = new URL(url!); } catch {
-    return NextResponse.json({ ok: false, error: "bad_url" }, { status: 400, headers: cors() });
+  try {
+    target = new URL(url!);
+  } catch {
+    return NextResponse.redirect(FALLBACK_IMAGE);
   }
 
   const ac = new AbortController();
@@ -52,9 +55,8 @@ export async function GET(req: Request) {
       cache: "no-store",
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": `${target.protocol}//${target.host}/`,
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://www.google.com/",
         "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
       },
       redirect: "follow",
@@ -63,24 +65,25 @@ export async function GET(req: Request) {
     clearTimeout(t);
 
     if (!r.ok) {
-      return NextResponse.json({ ok: false, error: "upstream_error", status: r.status }, { status: 502, headers: cors() });
+      console.warn("imgx: upstream fetch failed", r.status, url);
+      return NextResponse.redirect(FALLBACK_IMAGE);
     }
 
-    // grubi limit po headeru
     const lenStr = r.headers.get("content-length");
     if (lenStr) {
       const len = Number(lenStr);
       if (Number.isFinite(len) && len > MAX_BYTES) {
-        return NextResponse.json({ ok: false, error: "too_large", max: MAX_BYTES }, { status: 413, headers: cors() });
+        console.warn("imgx: file too large", len, url);
+        return NextResponse.redirect(FALLBACK_IMAGE);
       }
     }
 
     const buf = Buffer.from(await r.arrayBuffer());
     if (buf.byteLength > MAX_BYTES) {
-      return NextResponse.json({ ok: false, error: "too_large", max: MAX_BYTES }, { status: 413, headers: cors() });
+      console.warn("imgx: buffer too large", buf.byteLength, url);
+      return NextResponse.redirect(FALLBACK_IMAGE);
     }
 
-    // sharp pipeline (strip meta, minimalni touch za hash, resize, reencode)
     let img = sharp(buf, { failOn: "none", limitInputPixels: false })
       .resize({ width: w, withoutEnlargement: true, fit: "inside" })
       .gamma(1.01)
@@ -102,7 +105,6 @@ export async function GET(req: Request) {
     }
 
     const out = await img.toBuffer();
-    // ✅ Pretvori Buffer u Uint8Array da umiri TypeScript (BodyInit uključuje BufferSource)
     const body = new Uint8Array(out);
 
     return new NextResponse(body, {
@@ -115,10 +117,7 @@ export async function GET(req: Request) {
     });
   } catch (e: any) {
     clearTimeout(t);
-    const aborted = e?.name === "AbortError";
-    return NextResponse.json(
-      { ok: false, error: aborted ? "timeout" : "transform_failed" },
-      { status: 502, headers: cors() }
-    );
+    console.warn("imgx error:", e?.message || e);
+    return NextResponse.redirect(FALLBACK_IMAGE);
   }
 }
