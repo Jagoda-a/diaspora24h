@@ -1,7 +1,7 @@
 // app/api/translate/[id]/[lang]/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { aiTranslateStructured } from '@/lib/ai'
+import { aiRewrite } from '@/lib/ai'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,37 +12,34 @@ export async function GET(
 ) {
   const id = params.id
   const langParam = (params.lang || '').toLowerCase()
-  if (langParam !== 'en' && langParam !== 'de') {
+
+  // Dozvoljeni jezici
+  if (!['en', 'de'].includes(langParam)) {
     return NextResponse.json({ ok: false, error: 'lang_not_supported' }, { status: 400 })
   }
   const lang = langParam as 'en' | 'de'
 
+  // Učitaj članak
   const a = await prisma.article.findUnique({
     where: { id },
-    select: { id: true, title: true, summary: true, content: true },
+    select: { id: true, title: true, summary: true, content: true, country: true, language: true },
   })
   if (!a) {
     return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 })
   }
 
-  // prevodimo strukturisano (vrati title/summary/content)
-  const translated = await aiTranslateStructured(
-    { title: a.title || '', summary: a.summary || '', content: a.content || '' },
-    lang
-  )
+  // Pozovi aiRewrite sa strukturisanim objektom
+  const translated = await aiRewrite({
+    sourceTitle: a.title || '',
+    plainText: `
+${a.summary || ''}
 
-  // Ako želiš i upis u bazu kad dodaš TEXT kolone (npr. translatedEn / translatedDe),
-  // odkomentariši i prilagodi ovde:
-  //
-  // try {
-  //   const field = lang === 'en' ? 'translatedEn' : 'translatedDe' // kolone tipa TEXT
-  //   await prisma.article.update({
-  //     where: { id: a.id },
-  //     data: { [field]: JSON.stringify(translated) as any },
-  //   })
-  // } catch (e) {
-  //   console.warn('Skip DB write (no column present):', e)
-  // }
+${a.content || ''}
+`,
+    language: lang,
+    country: a.country || undefined,
+    sourceName: 'Diaspora24h',
+  })
 
   return NextResponse.json({
     ok: true,
