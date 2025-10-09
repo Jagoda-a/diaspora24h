@@ -1,8 +1,8 @@
 // app/api/ingest/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { slugify } from '@/lib/slug'
-import { fetchFeeds, RS_SOURCES_RS, resolveBestCover, asProxiedImage } from '@/lib/rss'
+import { fetchFeeds, RS_SOURCES_RS } from '@/lib/rss'
 import { aiRewrite } from '@/lib/ai'
 import { classifyTitle } from '@/lib/cats'
 
@@ -17,6 +17,7 @@ type FlatItem = {
   contentHtml?: string
   isoDate?: string
   pubDate?: string
+  enclosureUrl?: string | null
   coverUrl?: string | null
 }
 
@@ -37,6 +38,45 @@ function pickFirst(arr: (string | undefined | null)[], maxLen = 2000) {
   return ''
 }
 
+function containsCyrillic(s: string) {
+  return /[\u0400-\u04FF]/.test(s)
+}
+
+function sanitizeAbsoluteUrl(url?: string | null) {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+    if (!/^https?:$/.test(u.protocol)) return null
+    return u.toString()
+  } catch { return null }
+}
+
+function isImagePath(pathname: string) {
+  return /\.(png|jpe?g|webp|gif|avif)$/i.test(pathname)
+}
+
+function extractImageUrl(html?: string | null) {
+  if (!html) return null
+  const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
+  if (m) {
+    try { return new URL(m[1], 'https://dummy.base').toString() }
+    catch { return sanitizeAbsoluteUrl(m[1]) }
+  }
+  return null
+}
+
+function firstValidCover(urls: (string | null | undefined)[]) {
+  for (const u of urls) {
+    const abs = sanitizeAbsoluteUrl(u || undefined)
+    if (!abs) continue
+    try {
+      const p = new URL(abs).pathname
+      if (isImagePath(p)) return abs
+    } catch {}
+  }
+  return null
+}
+
 function normTitleKey(s?: string | null) {
   return (s || '')
     .toLowerCase()
@@ -45,7 +85,6 @@ function normTitleKey(s?: string | null) {
     .trim()
 }
 
-// nađe jedinstven slug
 async function findUniqueSlug(base: string) {
   let slug = slugify(base)
   if (!slug) slug = 'vest'
@@ -58,31 +97,6 @@ async function findUniqueSlug(base: string) {
   }
 }
 
-// ukloni duplikate rečenica (prosta heuristika)
-function dedupeSentences(text: string): string {
-  const parts = text
-    .split(/([.!?]+)\s+/)
-    .reduce<string[]>((acc, cur, idx, arr) => {
-      if (idx % 2 === 0) {
-        const punct = arr[idx + 1] || ''
-        acc.push((cur + punct).trim())
-      }
-      return acc
-    }, [])
-    .filter(Boolean)
-
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const s of parts) {
-    const key = s.toLowerCase().replace(/\s+/g, ' ').trim()
-    if (key && !seen.has(key)) {
-      seen.add(key)
-      out.push(s)
-    }
-  }
-  return out.join(' ')
-}
-
 async function summarizeFromItem(item: FlatItem) {
   const plainText = pickFirst([stripHtml(item.contentHtml) || item.contentSnippet || ''], 6000)
   const ai = await aiRewrite({
@@ -92,31 +106,53 @@ async function summarizeFromItem(item: FlatItem) {
     country: 'rs',
     sourceName: item.sourceName || 'izvor',
   })
-  ai.content = dedupeSentences(ai.content || '')
-  ai.summary = dedupeSentences(ai.summary || '')
   return ai
 }
 
-async function handleIngest(req: NextRequest) {
-  const headerToken = req.headers.get('x-ingest-token') || ''
-  const envToken = process.env.INGEST_TOKEN || ''
-  if (!envToken || headerToken !== envToken) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
+/** AUTH — prihvata i header i query param. Loguje prisustvo tokena radi debug-a. */
+function requireTokenOrPass(req: Request): NextResponse | null {
+  const required = (process.env.INGEST_TOKEN ?? '').trim()
+  const url = new URL(req.url)
+  const gotHdr = (req.headers.get('x-ingest-token') ?? '').trim()
+  const gotQ = (url.searchParams.get('token') ?? '').trim()
 
+  // privremeni log (bez izbacivanja stvarnog tokena)
+  console.log('[INGEST AUTH]', {
+    required_len: required ? required.length : 0,
+    gotHdr: Boolean(gotHdr),
+    gotQ: Boolean(gotQ),
+  })
+
+  if (!required) return null // ako nema env-a, pusti zahtev
+  if (gotHdr === required || gotQ === required) return null
+
+  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+}
+
+/** Glavna ingest logika */
+async function runIngest() {
   const feeds = await fetchFeeds(RS_SOURCES_RS)
 
   const allItems: FlatItem[] = []
   for (const f of feeds) {
     const fallbackHost = (() => { try { return new URL(f.url).host } catch { return 'unknown' } })()
     for (const it of f.items as any[]) {
-      const host = (() => { try { return new URL(it.link).hostname } catch { return fallbackHost } })()
+      const host = (() => {
+        try { return new URL(it.link).hostname } catch { return fallbackHost }
+      })()
 
       const contentHtml: string | undefined =
         it['content:encoded'] || it.contentHtml || it.content || undefined
 
-      let cover: string | null = await resolveBestCover(it)
-      if (cover) cover = asProxiedImage(cover) // proxy kroz /api/img
+      let fromEnclosure: string | null = null
+      if (it.enclosure?.url) {
+        const type = String(it.enclosure.type || '').toLowerCase()
+        const url = sanitizeAbsoluteUrl(it.enclosure.url)
+        if (url && (type.startsWith('image/') || isImagePath(new URL(url).pathname))) {
+          fromEnclosure = url
+        }
+      }
+      const fromHtml = extractImageUrl(contentHtml || it.contentSnippet)
 
       allItems.push({
         sourceName: host,
@@ -126,12 +162,12 @@ async function handleIngest(req: NextRequest) {
         contentHtml,
         isoDate: it.isoDate,
         pubDate: it.pubDate,
-        coverUrl: cover,
+        enclosureUrl: fromEnclosure,
+        coverUrl: firstValidCover([fromHtml, fromEnclosure]),
       })
     }
   }
 
-  // grupiši po normalizovanom naslovu (isti događaj sa više izvora)
   const byTitle = new Map<string, FlatItem[]>()
   for (const it of allItems) {
     const key = normTitleKey(it.title)
@@ -147,14 +183,15 @@ async function handleIngest(req: NextRequest) {
   for (const [, group] of byTitle) {
     const first = group[0]
 
+    // ako želiš samo latinicu — preskoči ćirilicu:
+    // if (containsCyrillic(first.title)) continue
+
     const ai = await summarizeFromItem(first)
     const category = classifyTitle(ai.title, first.link)
-    const coverImage = first.coverUrl || null
-
+    const coverImage = firstValidCover(group.map(i => i.coverUrl))
     const publishedAt =
       (first.isoDate ? new Date(first.isoDate) : (first.pubDate ? new Date(first.pubDate) : new Date()))
 
-    // već postoji po sourceUrl?
     const byLink = await prisma.article.findFirst({ where: { sourceUrl: first.link } })
     if (byLink) {
       const updates: Record<string, any> = {}
@@ -192,12 +229,33 @@ async function handleIngest(req: NextRequest) {
     created++
   }
 
-  return NextResponse.json({ ok: true, created, updated })
+  return { created, updated }
 }
 
-export async function GET(req: NextRequest) {
-  return handleIngest(req)
+/** GET */
+export async function GET(req: Request) {
+  const authErr = requireTokenOrPass(req)
+  if (authErr) return authErr
+
+  try {
+    const { created, updated } = await runIngest()
+    return NextResponse.json({ ok: true, created, updated })
+  } catch (e) {
+    console.error(e)
+    return NextResponse.json({ ok: false, error: 'Ingest failed' }, { status: 500 })
+  }
 }
-export async function POST(req: NextRequest) {
-  return handleIngest(req)
+
+/** POST */
+export async function POST(req: Request) {
+  const authErr = requireTokenOrPass(req)
+  if (authErr) return authErr
+
+  try {
+    const { created, updated } = await runIngest()
+    return NextResponse.json({ ok: true, created, updated })
+  } catch (e) {
+    console.error(e)
+    return NextResponse.json({ ok: false, error: 'Ingest failed' }, { status: 500 })
+  }
 }
