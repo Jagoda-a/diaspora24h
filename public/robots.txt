@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /admin
+Disallow: /api/
+Allow: /
+
+Sitemap: https://diaspora24h.com/sitemap.xml
+Sitemap: https://diaspora24h.com/news-sitemap.xml

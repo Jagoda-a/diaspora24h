@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Article {
+  id          String   @id @default(cuid())
+  country     String
+  title       String
+  slug        String   @unique
+  summary     String
+  coverImage  String?
+  sourceUrl   String?
+  sourcesJson String?
+  language    String    @default("sr")
+  publishedAt DateTime?
+  content     String?
+  category    String    @default("nepoznato")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([category, publishedAt])
+
+  translationsJson String?
+
+    // --- SEO ---
+  seoTitle        String?   // ručni <title> override
+  seoDescription  String?   // ručni meta description
+  ogImage         String?   // ručni og:image (ako želiš drugačiju od coverImage)
+  canonicalUrl    String?   // canonical link
+  noindex         Boolean?  // ako želiš da isključiš iz indexa
+  // opcionalno:
+  // twitterTitle   String?
+  // twitterDesc    String?
+}
