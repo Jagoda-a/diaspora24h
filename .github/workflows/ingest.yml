@@ -1,0 +1,15 @@
+name: Ingest every 12 minutes
+
+on:
+  schedule:
+    - cron: "*/12 * * * *"   # svakih 12 min (UTC)
+  workflow_dispatch:          # ručno pokretanje iz Actions taba
+
+jobs:
+  call-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit cron proxy (production)
+        run: |
+          curl -sS -X GET "https://diaspora24h.com/api/cron/ingest" \
+            -H "User-Agent: diaspora24h-cron/1.0"
