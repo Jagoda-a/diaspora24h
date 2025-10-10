@@ -1,27 +1,37 @@
 // app/vesti/k/[category]/page.tsx
+import type { Metadata } from 'next'
 import Link from 'next/link'
 import { prisma } from '@/lib/db'
 import ArticleCard from '@/components/ArticleCard'
-import { CATS, type Cat } from '@/lib/cats' // ← jedan import je dovoljan
+import { CATS, CAT_KEYS, type Cat } from '@/lib/cats'
 
 type Props = { params: { category: Cat } }
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 60
+
 export function generateStaticParams() {
-  return CATS
-    .filter(c => c.slug !== 'nepoznato')
-    .map(c => ({ category: c.slug }))
+  return CAT_KEYS
+    .filter((k) => k !== ('nepoznato' as any))
+    .map((category) => ({ category }))
 }
 
-export async function generateMetadata({ params }: Props) {
-  const cat = CATS.find(c => c.slug === params.category)
-  return { title: cat ? `Vesti – ${cat.label}` : 'Vesti' }
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const catKey = CAT_KEYS.includes(params.category) ? params.category : 'drustvo'
+  const label = CATS[catKey]?.label ?? 'Vesti'
+  return {
+    title: `Vesti – ${label}`,
+    description: `Najnovije vesti iz kategorije: ${label}.`,
+  }
 }
 
 export default async function CatPage({ params }: Props) {
-  const cat = CATS.find(c => c.slug === params.category)
-  if (!cat) {
+  const catKey: Cat = CAT_KEYS.includes(params.category) ? params.category : 'drustvo'
+  const catDef = CATS[catKey]
+
+  if (!catDef) {
     return (
-      <main>
+      <main className="container" style={{ padding: '16px 0 32px' }}>
         <h1>Vesti</h1>
         <p>Nepoznata kategorija.</p>
         <p><Link href="/vesti">Nazad na kategorije</Link></p>
@@ -30,18 +40,29 @@ export default async function CatPage({ params }: Props) {
   }
 
   const items = await prisma.article.findMany({
-    where: { country: 'rs', category: params.category },
+    where: { category: catKey },
     orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
     take: 60,
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      summary: true,
+      coverImage: true,
+      country: true,
+      publishedAt: true,
+      category: true,
+    },
   })
 
   return (
-    <main>
-      <h1 style={{fontSize:'22px', margin:'0 0 12px 0'}}>Vesti – {cat.label}</h1>
+    <main className="container" style={{ padding: '16px 0 32px' }}>
+      <h1 style={{ fontSize: '22px', margin: '0 0 12px 0' }}>Vesti – {catDef.label}</h1>
+
       {items.length === 0 && <p>Nema još vesti u ovoj kategoriji.</p>}
 
       <div className="cards-grid">
-        {items.map(a => (
+        {items.map((a) => (
           <ArticleCard
             key={a.id}
             article={{
