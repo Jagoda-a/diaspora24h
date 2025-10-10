@@ -307,7 +307,7 @@ export default async function ArticlePage({ params }: Props) {
           }}
         />
 
-        {/* HERO blok sa unutrašnjim marginama kroz .card-body */}
+        {/* HERO blok */}
         <div className="card-body">
           <div className="article-hero">
             {heroSrc ? (
@@ -332,10 +332,24 @@ export default async function ArticlePage({ params }: Props) {
           </div>
         </div>
 
-        {/* Telo članka sa istim levim/desnim marginama (card-body) */}
-        <div className="card-body">
+        {/* Telo članka — FULL WIDTH */}
+        <div
+          className="card-body"
+          style={{
+            // Ako parent .card koristi grid za hero (2 kolone), ovim garantujemo da
+            // telo zauzme celu širinu (od početka slike do kraja naslova)
+            gridColumn: '1 / -1',
+          }}
+        >
           <div
-            className="prose"
+            className="prose prose-full"
+            style={{
+              // ukloni bilo kakav max-width iz globalne .prose stilizacije
+              maxWidth: 'none',
+              width: '100%',
+              lineHeight: 1.7,
+              fontSize: 18,
+            }}
             dangerouslySetInnerHTML={{ __html: toHtml(content) }}
           />
           {sourceAnchor ? <p style={{ marginTop: 16 }}>{sourceAnchor}</p> : null}
