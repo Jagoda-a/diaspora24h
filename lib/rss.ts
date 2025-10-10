@@ -18,26 +18,35 @@ export type FeedWithItems = {
 }
 
 export const RS_SOURCES_RS: string[] = [
-  // Opšti izvori (već provereni)
-  'https://www.rts.rs/page/stories/sr/rss.html',
-  'https://n1info.rs/feed/',
-  'https://nova.rs/feed/',
+  // Opšte / Politika
   'https://www.danas.rs/feed/',
-  'https://www.kurir.rs/rss/vesti',
-  'https://www.blic.rs/rss/vesti',
+  'https://n1info.rs/feed/',
   'https://www.vreme.com/feed/',
-  'https://www.nedeljnik.rs/feed/',
-  'https://novaekonomija.rs/feed/',
-  'https://www.telegraf.rs/rss',
+  'https://feeds.bbci.co.uk/serbian/lat/rss.xml',
+  'https://www.rts.rs/page/stories/sr/rss.html',
+  'https://www.dw.com/sr-Latn/rss',
 
-  // ➕ Sport (da ne bude sve politika)
-  'https://www.rts.rs/page/sport/sr/rss.html', // RTS Sport
-  'https://n1info.rs/sport/feed/',             // N1 Sport
-  'https://nova.rs/sport/feed/',               // Nova.rs Sport
-  'https://www.blic.rs/rss/sport',             // Blic Sport
-  'https://www.kurir.rs/rss/sport',            // Kurir Sport
-  'https://www.telegraf.rs/rss/sport',         // Telegraf Sport
-  'https://zurnal.rs/rss',                     // Sportski žurnal (RSS)
+  // Ekonomija
+  'https://novaekonomija.rs/feed/',
+  'https://biznis.rs/feed/',
+
+  // Sport
+  'https://www.rts.rs/page/sport/sr/rss.html',
+  'https://mondo.rs/rss/644/Sport',
+  'https://mondo.rs/rss/646/Sport/Fudbal',
+  'https://mondo.rs/rss/652/Sport/Kosarka',
+  'https://mondo.rs/rss/657/Sport/Tenis',
+
+  // Kultura / Lifestyle / Zanimljivosti
+  'https://citymagazine.danas.rs/feed/',
+
+  // Tech / IT
+  'https://pcpress.rs/feed/',
+  'https://startit.rs/feed/',
+
+  // Hronika / Vesti (tabloidi — stabilni RSS endpointi)
+  'https://www.kurir.rs/rss/vesti',
+  'https://www.kurir.rs/rss/hronika',
 ]
 
 

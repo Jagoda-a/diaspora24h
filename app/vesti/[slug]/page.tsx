@@ -26,21 +26,39 @@ function getBaseUrl() {
 
 function brandFromHost(host: string): string {
   const h = host.replace(/^www\./i, '').toLowerCase();
+  // Opšte/vesti/politika
   if (h.endsWith('blic.rs')) return 'Blic';
   if (h.endsWith('kurir.rs')) return 'Kurir';
   if (h.endsWith('nova.rs')) return 'Nova.rs';
-  if (h.endsWith('telegraf.rs')) return 'Telegraf';
-  if (h.endsWith('b92.net')) return 'B92';
-  if (h.endsWith('n1info.rs')) return 'N1';
+  if (h.endsWith('n1info.rs') || h.endsWith('rs.n1info.com')) return 'N1';
   if (h.endsWith('rts.rs')) return 'RTS';
   if (h.endsWith('danas.rs')) return 'Danas';
-  if (h.endsWith('informer.rs')) return 'Informer';
+  if (h.endsWith('vreme.com')) return 'Vreme';
   if (h.endsWith('alo.rs')) return 'Alo';
-  if (h.endsWith('mondo.rs')) return 'Mondo';
-  if (h.endsWith('politika.rs')) return 'Politika';
+  if (h.endsWith('informer.rs')) return 'Informer';
   if (h.endsWith('nedeljnik.rs')) return 'Nedeljnik';
+  if (h.endsWith('politika.rs')) return 'Politika';
+
+  // BBC / DW (srpski)
+  if (h.endsWith('bbc.com') || h.endsWith('bbci.co.uk')) return 'BBC na srpskom';
+  if (h.endsWith('dw.com') || h.endsWith('s.dw.com')) return 'DW na srpskom';
+
+  // Biz / Ekonomija
   if (h.endsWith('novaekonomija.rs')) return 'Nova ekonomija';
-  if (h.endsWith('nova-s.tv') || h.endsWith('novas.tv')) return 'Nova S';
+  if (h.endsWith('biznis.rs')) return 'Biznis.rs';
+
+  // Tech / IT
+  if (h.endsWith('pcpress.rs')) return 'PC Press';
+  if (h.endsWith('startit.rs')) return 'Startit';
+
+  // Kultura / Lifestyle
+  if (h.endsWith('citymagazine.danas.rs')) return 'City Magazine';
+
+  // Sport
+  if (h.endsWith('mondo.rs')) return 'Mondo';
+  if (h.endsWith('telegraf.rs')) return 'Telegraf'; // (ako zadržiš linkove ka Telegrafu)
+
+  // Ostalo — vrati domen
   return h;
 }
 
