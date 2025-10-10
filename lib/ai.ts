@@ -4,8 +4,10 @@
 const AI_PROVIDER = process.env.AI_PROVIDER ?? 'openai' // 'openai' | 'none'
 const AI_MODEL = process.env.AI_MODEL ?? 'gpt-4o-mini'
 const OPENAI_KEY = process.env.OPENAI_API_KEY
-// Pismo: ARTICLE_SCRIPT=cyrl | latn  (default: cyrl)
-const ARTICLE_SCRIPT = (process.env.ARTICLE_SCRIPT ?? 'cyrl').toLowerCase() === 'latn' ? 'sr-Latn' : 'sr-Cyrl'
+
+// UVEK LATINICA (ignorišemo ARTICLE_SCRIPT iz .env)
+// Ako želiš da poštuješ env, promeni na: const TARGET_SCRIPT = (process.env.ARTICLE_SCRIPT?.toLowerCase()==='latn'?'sr-Latn':'sr-Cyrl')
+const TARGET_SCRIPT: 'sr-Latn' = 'sr-Latn'
 
 // Tipovi
 export type AiResult = { title?: string; content: string }
@@ -112,6 +114,39 @@ function polishNewsCopy(copy: string): string {
 }
 
 // -----------------------------
+// FORCE LATIN SCRIPT (bez deps)
+// -----------------------------
+
+// Mapa homoglifova ćirilica → latin lookalike (za homogenizaciju mešavine)
+const CYR_SINGLE_TO_LAT: Record<string,string> = {
+  А:'A', В:'B', Е:'E', К:'K', М:'M', Н:'H', О:'O', Р:'P', С:'S', Т:'T', У:'Y', Х:'X',
+  а:'a', в:'b', е:'e', к:'k', м:'m', н:'h', о:'o', р:'p', с:'s', т:'t', у:'y', х:'x',
+  Ї:'Ji', І:'I', ї:'ji', і:'i',
+}
+// Specifična srpska ćirilica → latinica
+const CYR_TO_LAT_TABLE: Record<string,string> = {
+  Љ:'Lj', Њ:'Nj', Џ:'Dž', љ:'lj', њ:'nj', џ:'dž',
+  Ђ:'Đ', ђ:'đ', Ћ:'Ć', ћ:'ć', Ч:'Č', ч:'č', Ж:'Ž', ж:'ž', Ш:'Š', ш:'š',
+}
+
+// Transliteracija ćirilica → latinica (sa homogenizacijom)
+function toLatin(s: string): string {
+  // prvo zameni specifična srpska slova/digrafe
+  const step1 = s.replace(/[\u0400-\u04FF]/g, ch => CYR_TO_LAT_TABLE[ch] ?? ch)
+  // zatim prebij sve preostale cyr homoglife u latin lookalike
+  const step2 = step1.replace(/[\u0400-\u04FF]/g, ch => CYR_SINGLE_TO_LAT[ch] ?? ch)
+  return step2
+}
+
+// “Na silu” primeni latinicu nad celim stringom
+function forceLatin(s: string): string {
+  if (!s) return s
+  // Ako već nema ćirilice, vrati brzo
+  if (!/[\u0400-\u04FF]/.test(s)) return s
+  return toLatin(s)
+}
+
+// -----------------------------
 // STARO (sumarizacija za UI)
 // -----------------------------
 export async function aiSummarize(input: {
@@ -122,13 +157,14 @@ export async function aiSummarize(input: {
   const { title, plainText, language = 'sr' } = input
 
   if (AI_PROVIDER !== 'openai' || !OPENAI_KEY) {
-    return fallback(plainText, title)
+    const fb = fallback(plainText, title)
+    return { title: fb.title, content: forceLatin(fb.content) }
   }
 
   const sys = [
     'Ti si novinski urednik.',
     `Pišeš kratko, činjenično, na jeziku "${language}" (ekavica).`,
-    `Pismo: ${ARTICLE_SCRIPT} (isključivo to pismo; ne mešaj pisma).`,
+    `Pismo: ${TARGET_SCRIPT} (isključivo to pismo; ne mešaj pisma).`,
     'Neutralan ton, bez clickbaita i bez izmišljenih činjenica.',
     'Bez šablona tipa: „uticaj na dijasporu“, „naši ljudi u…“ – nemoj to da dodaješ.',
     'Bez dupliranja rečenica i pasusa.',
@@ -167,18 +203,23 @@ export async function aiSummarize(input: {
   if (!r.ok) {
     const txt = await r.text().catch(() => '')
     console.warn('AI summarize error:', r.status, txt)
-    return fallback(plainText, title)
+    const fb = fallback(plainText, title)
+    return { title: fb.title, content: forceLatin(fb.content) }
   }
 
   const data = await r.json().catch(() => ({}))
   const raw = data?.choices?.[0]?.message?.content?.trim() || ''
   const content = polishNewsCopy(raw || '')
-  if (!content) return fallback(plainText, title)
-  return { title, content }
+  const fixed = forceLatin(content)
+  if (!fixed) {
+    const fb = fallback(plainText, title)
+    return { title: fb.title, content: forceLatin(fb.content) }
+  }
+  return { title, content: fixed }
 }
 
 // ---------------------------------------
-// NOVO: prepis + meta (bez dijaspore, realističan stil, striktno pismo)
+// NOVO: prepis + meta (realističan stil, striktno LATINICA)
 // ---------------------------------------
 export async function aiRewrite(input: {
   sourceTitle: string
@@ -195,14 +236,19 @@ export async function aiRewrite(input: {
   } = input
 
   if (AI_PROVIDER !== 'openai' || !OPENAI_KEY) {
-    return rewriteFallback(sourceTitle, plainText)
+    const fb = rewriteFallback(sourceTitle, plainText)
+    return {
+      title: forceLatin(fb.title),
+      summary: forceLatin(fb.summary),
+      content: forceLatin(fb.content),
+    }
   }
 
-  // Sistem: urednik, srpski, striktno jedno pismo, neutralno
+  // Sistem: urednik, srpski, striktno latinica, neutralno
   const sys = [
     'Ti si novinski urednik i lektor.',
     `Pišeš novinarski, neutralno, jasno i činjenično. Srpski jezik (${language}), ekavica.`,
-    `Pismo: ${ARTICLE_SCRIPT} (isključivo to pismo; ne mešaj ćirilicu i latinicu).`,
+    `Pismo: ${TARGET_SCRIPT} (isključivo latinica; ne mešaj ćirilicu i latinicu).`,
     'Bez clickbaita, bez izmišljanja, bez praznih fraza.',
     'Ne spominji „dijasporu“ i slične šablone osim ako izvor to eksplicitno navodi.',
     'Dozvoljena su lična imena/funkcije (ne zamenjuj eufemizmima).',
@@ -255,7 +301,12 @@ PRAVILA:
   if (!r.ok) {
     const txt = await r.text().catch(() => '')
     console.warn('AI rewrite error:', r.status, txt)
-    return rewriteFallback(sourceTitle, plainText)
+    const fb = rewriteFallback(sourceTitle, plainText)
+    return {
+      title: forceLatin(fb.title),
+      summary: forceLatin(fb.summary),
+      content: forceLatin(fb.content),
+    }
   }
 
   const data = await r.json().catch(() => ({}))
@@ -264,7 +315,12 @@ PRAVILA:
   const parsed = safeParseRewrite(raw)
   if (!parsed) {
     console.warn('AI rewrite JSON parse error, raw:', raw.slice(0, 300))
-    return rewriteFallback(sourceTitle, plainText)
+    const fb = rewriteFallback(sourceTitle, plainText)
+    return {
+      title: forceLatin(fb.title),
+      summary: forceLatin(fb.summary),
+      content: forceLatin(fb.content),
+    }
   }
 
   // Post-proces: poliranje + ograničenja dužine
@@ -280,7 +336,12 @@ PRAVILA:
       ? polishNewsCopy(clampWords(content + '\n\n' + clampWords(plainText, 50, 200), minWords, 600))
       : content
 
-  return { title, summary, content: finalContent }
+  // ✅ Na SILU prebaci sve u latinicu (naslov/summary/content)
+  return {
+    title: forceLatin(title),
+    summary: forceLatin(summary),
+    content: forceLatin(finalContent),
+  }
 }
 
 // -----------------------------
@@ -293,7 +354,8 @@ function fallback(plainText: string, title?: string): AiResult {
     .slice(0, 6)
     .join(' ')
   const content = sentences || (title ? `Kratka vest: ${title}` : 'Kratka vest.')
-  return { title, content: polishNewsCopy(content) }
+  const polished = polishNewsCopy(content)
+  return { title, content: forceLatin(polished) }
 }
 
 function rewriteFallback(sourceTitle: string, plainText: string): AiRewriteResult {
@@ -304,7 +366,6 @@ function rewriteFallback(sourceTitle: string, plainText: string): AiRewriteResul
   const title = makeTitle(`Sažetak: ${sourceTitle}`)
   const summary = clampChars(base.replace(/\s+/g, ' '), 170)
 
-  // Bez dijaspore u fallback-u
   const content = polishNewsCopy(
     [
       base,
@@ -313,5 +374,9 @@ function rewriteFallback(sourceTitle: string, plainText: string): AiRewriteResul
     ].join('\n\n')
   )
 
-  return { title, summary, content }
+  return {
+    title: forceLatin(title),
+    summary: forceLatin(summary),
+    content: forceLatin(content),
+  }
 }

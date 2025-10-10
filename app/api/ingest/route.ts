@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { slugify } from '@/lib/slug'
-import { fetchFeeds, RS_SOURCES_RS } from '@/lib/rss'
+import { fetchFeeds, RS_SOURCES_RS, resolveBestCover } from '@/lib/rss'
 import { aiRewrite } from '@/lib/ai'
 import { classifyTitle } from '@/lib/cats'
 
@@ -42,37 +42,42 @@ function pickFirst(arr: (string | undefined | null)[], maxLen = 6000) {
   return ''
 }
 
-function sanitizeAbsoluteUrl(url?: string | null) {
+function sanitizeAbsoluteUrl(url?: string | null, base?: string) {
   if (!url) return null
   try {
-    const u = new URL(url)
+    const u = base ? new URL(url, base) : new URL(url)
     if (!/^https?:$/.test(u.protocol)) return null
     return u.toString()
-  } catch { return null }
+  } catch {
+    try { if (base) return new URL(url, base).toString() } catch {}
+    return null
+  }
 }
 
-function isImagePath(pathname: string) {
-  return /\.(png|jpe?g|webp|gif|avif)$/i.test(pathname)
+/** NEMOJ zahtevati ekstenziju (.jpg); mnogi CDN-ovi nemaju je u path-u */
+function isImagePathLike(urlStr: string) {
+  try {
+    const u = new URL(urlStr)
+    // dozvoli query-only image endpointe; minimalni sanity check na host/https
+    return /^https?:$/.test(u.protocol) && !!u.hostname
+  } catch { return false }
 }
 
-function extractImageUrl(html?: string | null) {
+/** REZOLVUJ relativne <img src> linkove u odnosu na URL članka */
+function extractImageUrl(html?: string | null, baseForRel?: string) {
   if (!html) return null
   const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
-  if (m) {
-    try { return new URL(m[1], 'https://dummy.base').toString() }
-    catch { return sanitizeAbsoluteUrl(m[1]) }
-  }
-  return null
+  if (!m) return null
+  const raw = m[1]
+  const abs = sanitizeAbsoluteUrl(raw, baseForRel || undefined)
+  return abs && isImagePathLike(abs) ? abs : null
 }
 
+/** Uzmi prvi „verovatan“ image URL; ne odbacuj zbog ekstenzije */
 function firstValidCover(urls: (string | null | undefined)[]) {
   for (const u of urls) {
     const abs = sanitizeAbsoluteUrl(u || undefined)
-    if (!abs) continue
-    try {
-      const p = new URL(abs).pathname
-      if (isImagePath(p)) return abs
-    } catch {}
+    if (abs && isImagePathLike(abs)) return abs
   }
   return null
 }
@@ -89,8 +94,6 @@ async function findUniqueSlug(base: string) {
   const root = slugify(base) || 'vest'
   let slug = root
   let i = 2
-  // pokušaj dok ne nađemo slobodan slug
-  // (slug-2, slug-3, ...)
   while (true) {
     const existing = await prisma.article.findUnique({ where: { slug } })
     if (!existing) return slug
@@ -114,10 +117,9 @@ async function summarizeFromItem(item: FlatItem) {
    Auth + query params
 ------------------------- */
 
-/** Prihvata: ?token=... ili ?secret=... ili ?pass=... ili header Authorization: Bearer <token> / x-ingest-token: <token> */
 function requireTokenOrPass(req: Request): NextResponse | null {
   const required = (process.env.INGEST_TOKEN ?? '').trim()
-  if (!required) return null // ako nije setovan, dozvoli (dev/test)
+  if (!required) return null // dev/test
 
   const url = new URL(req.url)
   const q =
@@ -161,17 +163,18 @@ async function gatherItems(limit: number) {
       const contentHtml: string | undefined =
         it['content:encoded'] || it.contentHtml || it.content || undefined
 
-      // enclosure kao cover (ako je image)
+      // enclosure (ako je image)
       let fromEnclosure: string | null = null
       if (it.enclosure?.url) {
         const type = String(it.enclosure.type || '').toLowerCase()
-        const url = sanitizeAbsoluteUrl(it.enclosure.url)
-        if (url && (type.startsWith('image/') || isImagePath(new URL(url).pathname))) {
+        const url = sanitizeAbsoluteUrl(it.enclosure.url, it.link)
+        if (url && (type.startsWith('image/') || isImagePathLike(url))) {
           fromEnclosure = url
         }
       }
 
-      const fromHtml = extractImageUrl(contentHtml || it.contentSnippet)
+      // VAŽNO: relativni src se rešava prema it.link
+      const fromHtml = extractImageUrl(contentHtml || it.contentSnippet, it.link)
 
       allItems.push({
         sourceName: host,
@@ -187,7 +190,7 @@ async function gatherItems(limit: number) {
     }
   }
 
-  // Dedup po “normalizovanom” naslovu (grupisanje varijanti iste vesti)
+  // Grupisanje po normalizovanom naslovu
   const byTitle = new Map<string, FlatItem[]>()
   for (const it of allItems) {
     const key = normTitleKey(it.title)
@@ -197,9 +200,31 @@ async function gatherItems(limit: number) {
     byTitle.set(key, arr)
   }
 
-  // Uzmi prvih N grupa (limit), pošto su feedovi već u “skorije” redosledu
+  // Prvih N grupa (najskorije)
   const groups = Array.from(byTitle.values()).slice(0, limit)
   return groups
+}
+
+async function resolveCoverHard(first: FlatItem, group: FlatItem[]): Promise<string | null> {
+  // 1) pokušaj iz feed-a (enclosure/img u contentu)
+  let cover = firstValidCover(group.map(i => i.coverUrl))
+  if (cover) return cover
+
+  // 2) poslednja šansa: og:image ili prvi <img> sa stranice članka
+  try {
+    cover = await resolveBestCover({
+      title: first.title,
+      link: first.link,
+      contentSnippet: first.contentSnippet,
+      contentHtml: first.contentHtml,
+      enclosure: first.enclosureUrl ? { url: first.enclosureUrl, type: 'image/*' } : undefined,
+      isoDate: first.isoDate,
+      pubDate: first.pubDate,
+      content: first.contentHtml,
+    } as any)
+    if (cover && isImagePathLike(cover)) return cover
+  } catch {}
+  return null
 }
 
 async function runIngest(limit: number) {
@@ -215,14 +240,16 @@ async function runIngest(limit: number) {
     const tasks = batch.map(async (group) => {
       const first = group[0]
 
-      // Deduplikacija po sourceUrl (ako već postoji – samo dopuni prazna polja)
+      // Ako već postoji članak po linku — dopuni samo prazna polja (uključujući cover)
       const byLink = await prisma.article.findFirst({ where: { sourceUrl: first.link } })
       if (byLink) {
-        // eventualno osveži cover/summary/content ako nedostaju
-        const coverImage = firstValidCover(group.map(i => i.coverUrl))
         const updates: Record<string, any> = {}
 
-        if (!byLink.coverImage && coverImage) updates.coverImage = coverImage
+        if (!byLink.coverImage) {
+          const coverImage = await resolveCoverHard(first, group)
+          if (coverImage) updates.coverImage = coverImage
+        }
+
         if (!byLink.summary || !byLink.content) {
           const ai = await summarizeFromItem(first)
           if (!byLink.summary && ai.summary) updates.summary = ai.summary
@@ -236,10 +263,10 @@ async function runIngest(limit: number) {
         return
       }
 
-      // Nema po linku? Radi AI rewrite i kreiraj
+      // Novi članak
       const ai = await summarizeFromItem(first)
       const category = classifyTitle(ai.title, first.link)
-      const coverImage = firstValidCover(group.map(i => i.coverUrl))
+      const coverImage = await resolveCoverHard(first, group) // <-- garantirano pokušamo realnu sliku
       const publishedAt =
         (first.isoDate ? new Date(first.isoDate) :
          first.pubDate ? new Date(first.pubDate) : new Date())
@@ -253,7 +280,7 @@ async function runIngest(limit: number) {
           slug: uniqueSlug,
           summary: ai.summary,
           content: ai.content,
-          coverImage,
+          coverImage, // može biti null; frontend ima fallback, ali ovde maksimalno pokušavamo da popunimo
           sourceUrl: first.link,
           sourcesJson: null,
           language: 'sr',
@@ -264,7 +291,6 @@ async function runIngest(limit: number) {
       created++
     })
 
-    // ne ruši batch ako jedna padne
     await Promise.allSettled(tasks)
   }
 
