@@ -1,173 +1,191 @@
 // lib/cats.ts
 
+// Tipovi
 export type Cat =
   | 'politika'
-  | 'ekonomija'
-  | 'sport'
-  | 'kultura'
-  | 'lifestyle'
-  | 'tech'
   | 'hronika'
-  | 'svet'
+  | 'sport'
+  | 'ekonomija'
+  | 'tehnologija'
+  | 'kultura'
+  | 'zdravlje'
+  | 'lifestyle'
   | 'zanimljivosti'
-  | 'nepoznato';
+  | 'svet'
+  | 'region'
+  | 'drustvo'
 
-function norm(s?: string | null) {
-  return (s || '')
-    .toLowerCase()
-    .normalize('NFKD') // izbacuje dijakritike za lakše matcheve
-    .replace(/[^\p{Letter}\p{Number}\s/.-]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+export const UNKNOWN = 'nepoznato' as const
+export type CatOrUnknown = Cat | typeof UNKNOWN
+
+// Mapa kategorija (label + ključne reči za heuristiku)
+export const CATS: Record<Cat, { label: string; keywords: string[] }> = {
+  politika: {
+    label: 'Politika',
+    keywords: [
+      'vlada','parlament','predsednik','premijer','izbori','stranka','poslanik',
+      'ministar','demonstracije','sankcije','zakon','ustav','kampanja'
+    ],
+  },
+  hronika: {
+    label: 'Hronika',
+    keywords: [
+      'uhapšen','uhapsen','istraga','ubistvo','krađa','kradja','saobraćajka','saobracajka',
+      'nesreća','nesreca','požar','pozar','prekršaj','preksaj','policija','tužilaštvo','tuzilastvo','sud'
+    ],
+  },
+  sport: {
+    label: 'Sport',
+    keywords: [
+      'utakmica','liga','kup','gol','tenis','košarka','kosarka','fudbal','odbojka',
+      'rukomet','navijači','navijaci','selektor','trener','derbi','rekord'
+    ],
+  },
+  ekonomija: {
+    label: 'Ekonomija',
+    keywords: [
+      'inflacija','bnp','bdp','berza','privreda','tržište','trziste','akcije','kamatna stopa',
+      'investicija','budžet','budzet','deficit','kurs','dinar','euro','evro','plata'
+    ],
+  },
+  tehnologija: {
+    label: 'Tech',
+    keywords: [
+      'tehnologija','ai','veštačka inteligencija','vestacka inteligencija','aplikacija','android','ios',
+      'gadget','telefon','laptop','softver','hardver','startap','internet','bezbednost','cyber','sajber'
+    ],
+  },
+  kultura: {
+    label: 'Kultura',
+    keywords: [
+      'film','pozorište','pozoriste','knjiga','izložba','izlozba','festival','muzej','premijera',
+      'koncert','umetnost','umjetnost','autor','režiser','reziser','glumac','glumica'
+    ],
+  },
+  zdravlje: {
+    label: 'Zdravlje',
+    keywords: [
+      'zdravlje','bolnica','klinika','lek','lijek','vakcina','virus','bakterija','epidemija',
+      'simptomi','dijagnoza','dijeta','ishrana','lekari','doktor','medicina'
+    ],
+  },
+  lifestyle: {
+    label: 'Lifestyle',
+    keywords: [
+      'moda','putovanje','putovanja','izlasci','zabava','poznati','influencer','saveti',
+      'enterijer','kuvanje','recept','beauty','lepota','fitnes'
+    ],
+  },
+  zanimljivosti: {
+    label: 'Zanimljivosti',
+    keywords: [
+      'zanimljivo','neverovatno','neobično','neobicno','viralno','rekord','fenomen','otkriće','otkrice',
+      'arheologija','svemir','nauka','kuriozitet'
+    ],
+  },
+  svet: {
+    label: 'Svet',
+    keywords: [
+      'svet','međunarodno','medjunarodno','eu','un','nato','rat','konflikt','granica','ambasada',
+      'diplomatija','strani','globalno'
+    ],
+  },
+  region: {
+    label: 'Region',
+    keywords: [
+      'hrvatska','bosna','bih','crna gora','cg','slovenija','makedonija','severna makedonija','albanija',
+      'kosovo','metohija','balkan','region'
+    ],
+  },
+  drustvo: {
+    label: 'Društvo',
+    keywords: [
+      'škola','skola','univerzitet','fakultet','obrazovanje','socijalno','penzija','penzioner',
+      'radnik','radnici','zaposleni','nvo','komunalno','saobraćaj','saobracaj','infrastruktura'
+    ],
+  },
 }
 
-function host(u?: string) {
-  try { return new URL(u!).host.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
-}
-function path(u?: string) {
-  try { return new URL(u!).pathname.toLowerCase(); } catch { return ''; }
-}
+// Niz ključeva (za where: { in: ... } i slične potrebe)
+export const CAT_KEYS = Object.keys(CATS) as Cat[]
 
-/** Pravila po domenu i path-u (hard signali) */
-function byDomainPath(u?: string): Cat | null {
-  const h = host(u);
-  const p = path(u);
-
-  // RTS
-  if (h.endsWith('rts.rs')) {
-    if (p.startsWith('/page/sport')) return 'sport';
-    if (p.includes('/ekonomija')) return 'ekonomija';
-    if (p.includes('/kultura')) return 'kultura';
-    if (p.includes('/region') || p.includes('/svet') || p.includes('/balkan')) return 'svet';
-    if (p.includes('/politika') || p.includes('/veste') || p.includes('/vesti') || p.includes('/stories')) return 'politika';
-  }
-
-  // N1
-  if (h.endsWith('n1info.rs') || h.endsWith('rs.n1info.com')) {
-    if (p.includes('/sport')) return 'sport';
-    if (p.includes('/biznis')) return 'ekonomija';
-    if (p.includes('/svet') || p.includes('/region')) return 'svet';
-    return 'politika';
-  }
-
-  // Danas / City Magazine
-  if (h.endsWith('danas.rs')) return 'politika';
-  if (h.endsWith('citymagazine.danas.rs')) return 'lifestyle';
-
-  // DW sr-lat / BBC srpski
-  if (h.endsWith('dw.com') || h.endsWith('s.dw.com') || h.endsWith('bbci.co.uk') || h.endsWith('bbc.com')) {
-    if (p.includes('/sport')) return 'sport';
-    if (p.includes('/biznis') || p.includes('/ekonomija')) return 'ekonomija';
-    if (p.includes('/kultura')) return 'kultura';
-    if (p.includes('/tehnologija') || p.includes('/tech') || p.includes('/nauka')) return 'tech';
-    if (p.includes('/svet') || p.includes('/region') || p.includes('/balkan')) return 'svet';
-    return 'politika';
-  }
-
-  // Nova ekonomija / Biznis.rs
-  if (h.endsWith('novaekonomija.rs') || h.endsWith('biznis.rs')) return 'ekonomija';
-
-  // PC Press / Startit
-  if (h.endsWith('pcpress.rs') || h.endsWith('startit.rs')) return 'tech';
-
-  // MONDO
-  if (h.endsWith('mondo.rs')) {
-    if (p.startsWith('/rss/644') || p.includes('/sport')) return 'sport';
-    if (p.includes('/zabava') || p.includes('/lifestyle')) return 'lifestyle';
-    if (p.includes('/kultura')) return 'kultura';
-    return 'zanimljivosti';
-  }
-
-  // Kurir
-  if (h.endsWith('kurir.rs')) {
-    if (p.includes('/hronika')) return 'hronika';
-    if (p.includes('/sport')) return 'sport';
-    if (p.includes('/biznis') || p.includes('/ekonomija')) return 'ekonomija';
-    if (p.includes('/zabava') || p.includes('/stil')) return 'lifestyle';
-    if (p.includes('/svet') || p.includes('/region')) return 'svet';
-    return 'politika';
-  }
-
-  // Blic
-  if (h.endsWith('blic.rs') || h.endsWith('static.blic.rs')) {
-    if (p.includes('/sport')) return 'sport';
-    if (p.includes('/vesti/hronika') || p.includes('/hronika')) return 'hronika';
-    if (p.includes('/biznis') || p.includes('/ekonomija')) return 'ekonomija';
-    if (p.includes('/kultura')) return 'kultura';
-    if (p.includes('/svet') || p.includes('/region')) return 'svet';
-    if (p.includes('/zabava') || p.includes('/slobodno-vreme') || p.includes('/zdravlje') || p.includes('/slatko-slano')) return 'lifestyle';
-    return 'politika';
-  }
-
-  // Vreme
-  if (h.endsWith('vreme.com')) {
-    if (p.includes('/kultura')) return 'kultura';
-    return 'politika';
-  }
-
-  // fallback
-  return null;
+// Brendiranje po hostu (za prikaz izvora)
+export function brandFromHost(host: string): string {
+  const h = host.replace(/^www\./i, '').toLowerCase()
+  if (h.endsWith('blic.rs')) return 'Blic'
+  if (h.endsWith('kurir.rs')) return 'Kurir'
+  if (h.endsWith('nova.rs')) return 'Nova.rs'
+  if (h.endsWith('telegraf.rs')) return 'Telegraf'
+  if (h.endsWith('b92.net')) return 'B92'
+  if (h.endsWith('n1info.rs')) return 'N1'
+  if (h.endsWith('rts.rs')) return 'RTS'
+  if (h.endsWith('danas.rs')) return 'Danas'
+  if (h.endsWith('informer.rs')) return 'Informer'
+  if (h.endsWith('alo.rs')) return 'Alo'
+  if (h.endsWith('mondo.rs')) return 'Mondo'
+  if (h.endsWith('politika.rs')) return 'Politika'
+  if (h.endsWith('nedeljnik.rs')) return 'Nedeljnik'
+  if (h.endsWith('novaekonomija.rs')) return 'Nova ekonomija'
+  if (h.endsWith('nova-s.tv') || h.endsWith('novas.tv')) return 'Nova S'
+  return h
 }
 
-/** Reči po kategorijama (meki signal) */
-const KW: Record<Exclude<Cat,'nepoznato'>, RegExp[]> = {
-  politika: [
-    /\b(vlada|skupstina|predsednik|ministar|izbori|opozicija|koalicija|resor)\b/i,
-  ],
-  ekonomija: [
-    /\b(bdp|inflacija|kamat|berza|privreda|ekonomija|investic|porez|plate|budzet|subvenc)\b/i,
-  ],
-  sport: [
-    /\b(sport|fudbal|kosarka|tenis|derbi|lig(a|e)|turnir|reprezentacija|zvezda|partizan|novak|djokovi[ck])\b/i,
-  ],
-  kultura: [
-    /\b(kultura|film|pozoriste|knjig|izlozb|festival|muzej)\b/i,
-  ],
-  lifestyle: [
-    /\b(lifestyle|zabava|stil|moda|zdravlje|ishran|horoskop|psiholog|wellness)\b/i,
-  ],
-  tech: [
-    /\b(tehnolog|tech|it|ai|softver|hardver|telefon|aplikacij|gadget|internet|bezbednost|cyber)\b/i,
-  ],
-  hronika: [
-    /\b(hronika|uhaps|hapsenj|ubistv|saobracajn|nesrec|sudjenj|optuzeni|istrag|poz(ar|g))\b/i,
-  ],
-  svet: [
-    /\b(svet|eu|un|nato|region|balkan|globalno|geopolit|ukrajina|rusija|sad|kina)\b/i,
-  ],
-  zanimljivosti: [
-    /\b(zanimljiv|neob(icn|ično)|viral|trend|bizarno|kuriozitet)\b/i,
-  ],
-};
-
-function byKeywords(title?: string, url?: string): Cat | null {
-  const t = norm(title);
-  const u = norm(url);
-
-  // prvo sport/tech/hronika
-  if (KW.sport.some(rx => rx.test(t) || rx.test(u))) return 'sport';
-  if (KW.tech.some(rx => rx.test(t) || rx.test(u))) return 'tech';
-  if (KW.hronika.some(rx => rx.test(t) || rx.test(u))) return 'hronika';
-
-  // zatim ekonomija/svet/kultura/lifestyle
-  if (KW.ekonomija.some(rx => rx.test(t) || rx.test(u))) return 'ekonomija';
-  if (KW.svet.some(rx => rx.test(t) || rx.test(u))) return 'svet';
-  if (KW.kultura.some(rx => rx.test(t) || rx.test(u))) return 'kultura';
-  if (KW.lifestyle.some(rx => rx.test(t) || rx.test(u))) return 'lifestyle';
-
-  // fallback politika/zanimljivosti
-  if (KW.politika.some(rx => rx.test(t) || rx.test(u))) return 'politika';
-  if (KW.zanimljivosti.some(rx => rx.test(t) || rx.test(u))) return 'zanimljivosti';
-
-  return null;
+// Jednostavna provera da li je string validna kategorija
+export function isValidCat(x: string | null | undefined): x is Cat {
+  return !!x && (CAT_KEYS as string[]).includes(x)
 }
 
-export function classifyTitle(title: string, url?: string): Cat {
-  const byDom = byDomainPath(url);
-  if (byDom) return byDom;
+// Mapiranje kategorija → default slika (public/cats/*.jpg|png)
+const CAT_IMAGES: Partial<Record<Cat, string>> = {
+  politika: '/cats/politika.jpg',
+  hronika: '/cats/hronika.jpg',
+  sport: '/cats/sport.jpg',
+  ekonomija: '/cats/ekonomija.jpg',
+  tehnologija: '/cats/tehnologija.jpg',
+  kultura: '/cats/kultura.jpg',
+  zdravlje: '/cats/zdravlje.jpg',
+  lifestyle: '/cats/lifestyle.jpg',
+  zanimljivosti: '/cats/zanimljivosti.jpg',
+  svet: '/cats/svet.jpg',
+  region: '/cats/region.jpg',
+  drustvo: '/cats/drustvo.jpg',
+}
 
-  const byKw = byKeywords(title, url);
-  if (byKw) return byKw;
+export function getCatImage(cat: Cat): string {
+  return CAT_IMAGES[cat] || '/cats/default.jpg'
+}
 
-  return 'nepoznato';
+// Heuristička klasifikacija naslova/linka
+export function classifyTitle(title: string, sourceUrl?: string): Cat {
+  const t = (title || '').toLowerCase()
+  const url = (sourceUrl || '').toLowerCase()
+
+  // 1) Po domenima (ako želiš “hard routing”, dodaj ovde)
+  if (/sport|sports/.test(url)) return 'sport'
+  if (/tech|tehnologija|it/.test(url)) return 'tehnologija'
+  if (/kultura|culture|art/.test(url)) return 'kultura'
+  if (/ekonomija|biznis|business|finans/.test(url)) return 'ekonomija'
+  if (/zdravlje|health|medicin/.test(url)) return 'zdravlje'
+  if (/lifestyl|magazin|zanimljivosti/.test(url)) return 'zanimljivosti'
+  if (/region|balkan/.test(url)) return 'region'
+  if (/world|svet|global/.test(url)) return 'svet'
+  if (/hronika|crna-h|crna-hronika/.test(url)) return 'hronika'
+  if (/politika|policy|parlament|vlada|izbori/.test(url)) return 'politika'
+
+  // 2) Po ključnim rečima u naslovu
+  let best: { cat: Cat; score: number } | null = null
+  for (const cat of CAT_KEYS) {
+    const kws = CATS[cat].keywords
+    let score = 0
+    for (const kw of kws) {
+      if (t.includes(kw)) score++
+    }
+    if (!best || score > best.score) {
+      best = { cat, score }
+    }
+  }
+
+  // 3) Prag: ako ništa ne “pogađa”, spusti u društvo (ili zanimljivosti)
+  if (!best || best.score === 0) return 'drustvo'
+  return best.cat
 }
