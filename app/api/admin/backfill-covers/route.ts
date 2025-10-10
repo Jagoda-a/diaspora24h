@@ -1,48 +1,49 @@
-// app/api/backfill-covers/route.ts
+// app/api/admin/backfill-covers/route.ts
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-/* --------------------------------
-   Auth (isti princip kao /api/ingest)
------------------------------------*/
-function requireTokenOrPass(req: Request): NextResponse | null {
-  const required = (process.env.INGEST_TOKEN ?? '').trim()
-  if (!required) return null // ako nije setovan, dozvoli (dev/test)
+/* =========================
+   AUTH (ADMIN/BACKFILL token)
+========================= */
+function requireAdmin(req: Request): NextResponse | null {
+  const need =
+    (process.env.BACKFILL_TOKEN ?? '').trim() ||
+    (process.env.ADMIN_TOKEN ?? '').trim()
+
+  if (!need) return null // dev/test
 
   const url = new URL(req.url)
-  const q =
-    (url.searchParams.get('token') ?? '') ||
-    (url.searchParams.get('secret') ?? '') ||
-    (url.searchParams.get('pass') ?? '')
-  const hdrBearer = req.headers.get('authorization') || ''
-  const hdrSimple = req.headers.get('x-ingest-token') || ''
+  const q = (url.searchParams.get('token') ?? '').trim()
+  const hdr = (req.headers.get('authorization') ?? '').trim()
+  const simple = (req.headers.get('x-admin-token') ?? '').trim()
 
   const ok =
-    q.trim() === required ||
-    hdrSimple.trim() === required ||
-    /^Bearer\s+(.+)$/.test(hdrBearer) && hdrBearer.replace(/^Bearer\s+/i, '').trim() === required
+    q === need ||
+    simple === need ||
+    (/^Bearer\s+(.+)$/i.test(hdr) && hdr.replace(/^Bearer\s+/i, '') === need)
 
   if (ok) return null
   return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 }
 
-function parseLimit(req: Request) {
-  const url = new URL(req.url)
-  const n = parseInt(url.searchParams.get('limit') || '40', 10)
-  return Math.max(1, Math.min(Number.isFinite(n) ? n : 40, 100))
+function parseQuery(req: Request) {
+  const u = new URL(req.url)
+  const limit = Math.max(1, Math.min(parseInt(u.searchParams.get('limit') ?? '200', 10) || 200, 1000))
+  const dryRun = u.searchParams.get('dryRun') === '1'
+  // onlyMissing=1 (default) → hvataj samo one bez cover-a
+  const onlyMissing = u.searchParams.get('onlyMissing') !== '0'
+  // force=1 → prepiši i postojeće cover-e
+  const force = u.searchParams.get('force') === '1'
+  return { limit, dryRun, onlyMissing, force }
 }
 
-/* --------------------------------
-   Helpers
------------------------------------*/
+/* =========================
+   Helpers (fetch & parse)
+========================= */
 const TIMEOUT_MS = 15_000
-
-function absUrl(src: string, base?: string | null) {
-  try { return new URL(src, base || undefined).toString() } catch { return null }
-}
 
 function sanitizeAbsoluteUrl(url?: string | null, base?: string) {
   if (!url) return null
@@ -80,8 +81,7 @@ async function fetchTextSafe(url: string): Promise<string | null> {
     const res = await fetch(url, {
       signal: ac.signal,
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; diaspora24h-bot/1.1; +https://diaspora24h.vercel.app)',
+        'User-Agent': 'Mozilla/5.0 (compatible; diaspora24h-bot/1.1; +https://diaspora24h.vercel.app)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'sr,en;q=0.8',
         'Cache-Control': 'no-cache',
@@ -126,7 +126,6 @@ function extractFirstImg(html?: string | null, base?: string): string | null {
 }
 
 async function looksLikeImage(url: string): Promise<boolean> {
-  // Brzi HEAD/GET da proverimo content-type
   const ac = new AbortController()
   const t = setTimeout(() => ac.abort(), 8000)
   try {
@@ -134,8 +133,7 @@ async function looksLikeImage(url: string): Promise<boolean> {
       method: 'HEAD',
       signal: ac.signal,
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; diaspora24h-bot/1.1; +https://diaspora24h.vercel.app)',
+        'User-Agent': 'Mozilla/5.0 (compatible; diaspora24h-bot/1.1; +https://diaspora24h.vercel.app)',
         'Accept': 'image/avif,image/webp,image/*;q=0.8,*/*;q=0.5',
         'Referer': new URL(url).origin,
       },
@@ -167,57 +165,91 @@ async function resolveCoverFromPage(articleUrl: string): Promise<string | null> 
   return null
 }
 
-/* --------------------------------
+/* =========================
    Backfill logika
------------------------------------*/
-async function backfill(limit: number) {
-  // Uzmemo najskorije artikle BEZ coverImage
+========================= */
+type Counters = Record<string, number>
+
+async function backfill({ limit, onlyMissing, force, dryRun }: {
+  limit: number
+  onlyMissing: boolean
+  force: boolean
+  dryRun: boolean
+}) {
+  const where = onlyMissing && !force
+    ? { OR: [{ coverImage: null as any }, { coverImage: '' }] }
+    : {} // force ili onlyMissing=0 → uzmi sve
+
   const articles = await prisma.article.findMany({
-    where: { OR: [{ coverImage: null }, { coverImage: '' }] },
+    where,
     orderBy: { publishedAt: 'desc' },
     take: limit,
-    select: { id: true, sourceUrl: true },
+    select: { id: true, sourceUrl: true, coverImage: true, slug: true },
   })
 
   let updated = 0
+  let skipped = 0
   let checked = 0
+  const reasons: Counters = {}
 
-  const CHUNK = 5
+  const CHUNK = 10
   for (let i = 0; i < articles.length; i += CHUNK) {
     const batch = articles.slice(i, i + CHUNK)
-    await Promise.allSettled(batch.map(async (a) => {
+
+    const tasks = batch.map(async (a) => {
       checked++
-      if (!a.sourceUrl) return
 
-      const img = await resolveCoverFromPage(a.sourceUrl)
-      if (!img) return
+      const hasCover = !!(a.coverImage && a.coverImage.trim())
+      if (hasCover && !force) {
+        skipped++; reasons['already_has_cover'] = (reasons['already_has_cover'] || 0) + 1
+        return
+      }
 
-      // Validiraj da je realno slika (content-type ili ekstenzija)
+      const link = a.sourceUrl ?? undefined
+      if (!link) {
+        skipped++; reasons['no_source_url'] = (reasons['no_source_url'] || 0) + 1
+        return
+      }
+
+      const img = await resolveCoverFromPage(link)
+      if (!img) {
+        skipped++; reasons['not_found_on_page'] = (reasons['not_found_on_page'] || 0) + 1
+        return
+      }
+
       const ok = await looksLikeImage(img)
-      if (!ok) return
+      if (!ok) {
+        skipped++; reasons['not_image_like'] = (reasons['not_image_like'] || 0) + 1
+        return
+      }
 
-      await prisma.article.update({
-        where: { id: a.id },
-        data: { coverImage: img },
-      })
+      if (!dryRun) {
+        await prisma.article.update({
+          where: { id: a.id },
+          data: { coverImage: img },
+        })
+      }
       updated++
-    }))
+    })
+
+    await Promise.allSettled(tasks)
   }
 
-  return { checked, updated }
+  return { total: articles.length, checked, updated, skipped, reasons }
 }
 
-/* --------------------------------
+/* =========================
    Handler
------------------------------------*/
+========================= */
 export async function GET(req: Request) {
-  const authErr = requireTokenOrPass(req)
-  if (authErr) return authErr
+  const auth = requireAdmin(req)
+  if (auth) return auth
+
+  const params = parseQuery(req)
 
   try {
-    const limit = parseLimit(req)
-    const { checked, updated } = await backfill(limit)
-    return NextResponse.json({ ok: true, checked, updated })
+    const result = await backfill(params)
+    return NextResponse.json({ ok: true, ...params, ...result })
   } catch (e) {
     console.error(e)
     return NextResponse.json({ ok: false, error: 'backfill failed' }, { status: 500 })
