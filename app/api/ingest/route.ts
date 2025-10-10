@@ -13,6 +13,7 @@ type FlatItem = {
   sourceName: string
   title: string
   link: string
+  linkCanon?: string | null
   contentSnippet?: string
   contentHtml?: string
   isoDate?: string
@@ -54,16 +55,24 @@ function sanitizeAbsoluteUrl(url?: string | null, base?: string) {
   }
 }
 
-/** NEMOJ zahtevati ekstenziju (.jpg); mnogi CDN-ovi nemaju je u path-u */
+/** Kanonikalizuj link (origin + pathname, bez query/frag) */
+function canonicalizeLink(u?: string | null): string | null {
+  if (!u) return null
+  try {
+    const x = new URL(u)
+    return `${x.origin}${x.pathname}`
+  } catch { return null }
+}
+
+/** NEMOJ zahtevati ekstenziju (.jpg); mnogi CDN-ovi je nemaju u path-u */
 function isImagePathLike(urlStr: string) {
   try {
     const u = new URL(urlStr)
-    // dozvoli query-only image endpointe; minimalni sanity check na host/https
     return /^https?:$/.test(u.protocol) && !!u.hostname
   } catch { return false }
 }
 
-/** REZOLVUJ relativne <img src> linkove u odnosu na URL članka */
+/** REŠI relativne <img src> u odnosu na URL članka */
 function extractImageUrl(html?: string | null, baseForRel?: string) {
   if (!html) return null
   const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
@@ -73,7 +82,7 @@ function extractImageUrl(html?: string | null, baseForRel?: string) {
   return abs && isImagePathLike(abs) ? abs : null
 }
 
-/** Uzmi prvi „verovatan“ image URL; ne odbacuj zbog ekstenzije */
+/** Prvi “verovatan” image URL; ne odbacuj zbog ekstenzije */
 function firstValidCover(urls: (string | null | undefined)[]) {
   for (const u of urls) {
     const abs = sanitizeAbsoluteUrl(u || undefined)
@@ -132,7 +141,7 @@ function requireTokenOrPass(req: Request): NextResponse | null {
   const ok =
     q.trim() === required ||
     hdrSimple.trim() === required ||
-    /^Bearer\s+(.+)$/.test(hdrBearer) && hdrBearer.replace(/^Bearer\s+/i, '').trim() === required
+    (/^Bearer\s+(.+)$/i.test(hdrBearer) && hdrBearer.replace(/^Bearer\s+/i, '').trim() === required)
 
   if (ok) return null
   return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
@@ -173,13 +182,16 @@ async function gatherItems(limit: number) {
         }
       }
 
-      // VAŽNO: relativni src se rešava prema it.link
+      // relativni src rešavamo prema it.link
       const fromHtml = extractImageUrl(contentHtml || it.contentSnippet, it.link)
+
+      const linkCanon = canonicalizeLink(it.link)
 
       allItems.push({
         sourceName: host,
         title: it.title || 'Vest',
         link: it.link,
+        linkCanon,
         contentSnippet: it.contentSnippet,
         contentHtml,
         isoDate: it.isoDate,
@@ -206,7 +218,7 @@ async function gatherItems(limit: number) {
 }
 
 async function resolveCoverHard(first: FlatItem, group: FlatItem[]): Promise<string | null> {
-  // 1) pokušaj iz feed-a (enclosure/img u contentu)
+  // 1) pokušaj iz feed-a
   let cover = firstValidCover(group.map(i => i.coverUrl))
   if (cover) return cover
 
@@ -227,6 +239,24 @@ async function resolveCoverHard(first: FlatItem, group: FlatItem[]): Promise<str
   return null
 }
 
+/** meka deduplikacija po naslovu (poslednja 3 dana) */
+async function looksLikeRecentDuplicateByTitle(title: string) {
+  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+  const probe = (title || '').slice(0, 48)
+  if (!probe) return null
+  const maybe = await prisma.article.findFirst({
+    where: {
+      publishedAt: { gte: threeDaysAgo },
+      OR: [
+        { title: { contains: probe, mode: 'insensitive' } },
+        { slug:  { contains: slugify(probe), mode: 'insensitive' } },
+      ],
+    },
+    orderBy: { publishedAt: 'desc' },
+  })
+  return maybe
+}
+
 async function runIngest(limit: number) {
   const groups = await gatherItems(limit)
 
@@ -239,23 +269,44 @@ async function runIngest(limit: number) {
     const batch = groups.slice(i, i + CHUNK)
     const tasks = batch.map(async (group) => {
       const first = group[0]
+      const linkCanon = first.linkCanon || canonicalizeLink(first.link) || first.link
 
-      // Ako već postoji članak po linku — dopuni samo prazna polja (uključujući cover)
-      const byLink = await prisma.article.findFirst({ where: { sourceUrl: first.link } })
+      // 0) meka deduplikacija po naslovu (ako već postoji skoro identično)
+      const recentDupe = await looksLikeRecentDuplicateByTitle(first.title || '')
+      if (recentDupe) {
+        // eventualno dopuni cover/summary/content ako fale
+        const updates: Record<string, any> = {}
+        if (!recentDupe.coverImage) {
+          const coverImage = await resolveCoverHard(first, group)
+          if (coverImage) updates.coverImage = coverImage
+        }
+        if ((!recentDupe.summary || !recentDupe.content)) {
+          const ai = await summarizeFromItem(first)
+          if (!recentDupe.summary && ai.summary) updates.summary = ai.summary
+          if (!recentDupe.content && ai.content) updates.content = ai.content
+        }
+        if (Object.keys(updates).length > 0) {
+          await prisma.article.update({ where: { id: recentDupe.id }, data: updates })
+          updated++
+        }
+        return
+      }
+
+      // 1) tvrda deduplikacija po linku (kanonski ili originalni)
+      const byLink = await prisma.article.findFirst({
+        where: { OR: [{ sourceUrl: first.link }, { sourceUrl: linkCanon }] }
+      })
       if (byLink) {
         const updates: Record<string, any> = {}
-
         if (!byLink.coverImage) {
           const coverImage = await resolveCoverHard(first, group)
           if (coverImage) updates.coverImage = coverImage
         }
-
         if (!byLink.summary || !byLink.content) {
           const ai = await summarizeFromItem(first)
           if (!byLink.summary && ai.summary) updates.summary = ai.summary
           if (!byLink.content && ai.content) updates.content = ai.content
         }
-
         if (Object.keys(updates).length > 0) {
           await prisma.article.update({ where: { id: byLink.id }, data: updates })
           updated++
@@ -263,10 +314,10 @@ async function runIngest(limit: number) {
         return
       }
 
-      // Novi članak
+      // 2) Novi članak
       const ai = await summarizeFromItem(first)
       const category = classifyTitle(ai.title, first.link)
-      const coverImage = await resolveCoverHard(first, group) // <-- garantirano pokušamo realnu sliku
+      const coverImage = await resolveCoverHard(first, group)
       const publishedAt =
         (first.isoDate ? new Date(first.isoDate) :
          first.pubDate ? new Date(first.pubDate) : new Date())
@@ -280,8 +331,8 @@ async function runIngest(limit: number) {
           slug: uniqueSlug,
           summary: ai.summary,
           content: ai.content,
-          coverImage, // može biti null; frontend ima fallback, ali ovde maksimalno pokušavamo da popunimo
-          sourceUrl: first.link,
+          coverImage,
+          sourceUrl: linkCanon, // ← uvek kanonski link
           sourcesJson: null,
           language: 'sr',
           publishedAt,
