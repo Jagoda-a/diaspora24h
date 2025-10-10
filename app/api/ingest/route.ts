@@ -21,6 +21,10 @@ type FlatItem = {
   coverUrl?: string | null
 }
 
+/* -------------------------
+   Utility
+------------------------- */
+
 function stripHtml(html?: string | null) {
   if (!html) return ''
   return html
@@ -31,15 +35,11 @@ function stripHtml(html?: string | null) {
     .trim()
 }
 
-function pickFirst(arr: (string | undefined | null)[], maxLen = 2000) {
+function pickFirst(arr: (string | undefined | null)[], maxLen = 6000) {
   for (const s of arr) {
     if (s && s.trim()) return s.trim().slice(0, maxLen)
   }
   return ''
-}
-
-function containsCyrillic(s: string) {
-  return /[\u0400-\u04FF]/.test(s)
 }
 
 function sanitizeAbsoluteUrl(url?: string | null) {
@@ -86,14 +86,15 @@ function normTitleKey(s?: string | null) {
 }
 
 async function findUniqueSlug(base: string) {
-  let slug = slugify(base)
-  if (!slug) slug = 'vest'
-  let i = 1
+  const root = slugify(base) || 'vest'
+  let slug = root
+  let i = 2
+  // pokušaj dok ne nađemo slobodan slug
+  // (slug-2, slug-3, ...)
   while (true) {
     const existing = await prisma.article.findUnique({ where: { slug } })
     if (!existing) return slug
-    i++
-    slug = `${slug}-${i}`
+    slug = `${root}-${i++}`
   }
 }
 
@@ -109,28 +110,44 @@ async function summarizeFromItem(item: FlatItem) {
   return ai
 }
 
-/** AUTH — prihvata i header i query param. Loguje prisustvo tokena radi debug-a. */
+/* -------------------------
+   Auth + query params
+------------------------- */
+
+/** Prihvata: ?token=... ili ?secret=... ili ?pass=... ili header Authorization: Bearer <token> / x-ingest-token: <token> */
 function requireTokenOrPass(req: Request): NextResponse | null {
   const required = (process.env.INGEST_TOKEN ?? '').trim()
+  if (!required) return null // ako nije setovan, dozvoli (dev/test)
+
   const url = new URL(req.url)
-  const gotHdr = (req.headers.get('x-ingest-token') ?? '').trim()
-  const gotQ = (url.searchParams.get('token') ?? '').trim()
+  const q =
+    (url.searchParams.get('token') ?? '') ||
+    (url.searchParams.get('secret') ?? '') ||
+    (url.searchParams.get('pass') ?? '')
+  const hdrBearer = req.headers.get('authorization') || ''
+  const hdrSimple = req.headers.get('x-ingest-token') || ''
 
-  // privremeni log (bez izbacivanja stvarnog tokena)
-  console.log('[INGEST AUTH]', {
-    required_len: required ? required.length : 0,
-    gotHdr: Boolean(gotHdr),
-    gotQ: Boolean(gotQ),
-  })
+  const ok =
+    q.trim() === required ||
+    hdrSimple.trim() === required ||
+    /^Bearer\s+(.+)$/.test(hdrBearer) && hdrBearer.replace(/^Bearer\s+/i, '').trim() === required
 
-  if (!required) return null // ako nema env-a, pusti zahtev
-  if (gotHdr === required || gotQ === required) return null
-
-  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (ok) return null
+  return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 }
 
-/** Glavna ingest logika */
-async function runIngest() {
+function parseQuery(req: Request) {
+  const url = new URL(req.url)
+  const limit = Math.max(1, Math.min(+(url.searchParams.get('limit') ?? 10), 25))
+  const dryRun = url.searchParams.get('dryRun') === '1'
+  return { limit, dryRun }
+}
+
+/* -------------------------
+   Ingest
+------------------------- */
+
+async function gatherItems(limit: number) {
   const feeds = await fetchFeeds(RS_SOURCES_RS)
 
   const allItems: FlatItem[] = []
@@ -144,6 +161,7 @@ async function runIngest() {
       const contentHtml: string | undefined =
         it['content:encoded'] || it.contentHtml || it.content || undefined
 
+      // enclosure kao cover (ako je image)
       let fromEnclosure: string | null = null
       if (it.enclosure?.url) {
         const type = String(it.enclosure.type || '').toLowerCase()
@@ -152,6 +170,7 @@ async function runIngest() {
           fromEnclosure = url
         }
       }
+
       const fromHtml = extractImageUrl(contentHtml || it.contentSnippet)
 
       allItems.push({
@@ -168,6 +187,7 @@ async function runIngest() {
     }
   }
 
+  // Dedup po “normalizovanom” naslovu (grupisanje varijanti iste vesti)
   const byTitle = new Map<string, FlatItem[]>()
   for (const it of allItems) {
     const key = normTitleKey(it.title)
@@ -177,68 +197,98 @@ async function runIngest() {
     byTitle.set(key, arr)
   }
 
+  // Uzmi prvih N grupa (limit), pošto su feedovi već u “skorije” redosledu
+  const groups = Array.from(byTitle.values()).slice(0, limit)
+  return groups
+}
+
+async function runIngest(limit: number) {
+  const groups = await gatherItems(limit)
+
   let created = 0
   let updated = 0
 
-  for (const [, group] of byTitle) {
-    const first = group[0]
+  // mini konkurentnost: batch po 3 grupe
+  const CHUNK = 3
+  for (let i = 0; i < groups.length; i += CHUNK) {
+    const batch = groups.slice(i, i + CHUNK)
+    const tasks = batch.map(async (group) => {
+      const first = group[0]
 
-    // ako želiš samo latinicu — preskoči ćirilicu:
-    // if (containsCyrillic(first.title)) continue
+      // Deduplikacija po sourceUrl (ako već postoji – samo dopuni prazna polja)
+      const byLink = await prisma.article.findFirst({ where: { sourceUrl: first.link } })
+      if (byLink) {
+        // eventualno osveži cover/summary/content ako nedostaju
+        const coverImage = firstValidCover(group.map(i => i.coverUrl))
+        const updates: Record<string, any> = {}
 
-    const ai = await summarizeFromItem(first)
-    const category = classifyTitle(ai.title, first.link)
-    const coverImage = firstValidCover(group.map(i => i.coverUrl))
-    const publishedAt =
-      (first.isoDate ? new Date(first.isoDate) : (first.pubDate ? new Date(first.pubDate) : new Date()))
+        if (!byLink.coverImage && coverImage) updates.coverImage = coverImage
+        if (!byLink.summary || !byLink.content) {
+          const ai = await summarizeFromItem(first)
+          if (!byLink.summary && ai.summary) updates.summary = ai.summary
+          if (!byLink.content && ai.content) updates.content = ai.content
+        }
 
-    const byLink = await prisma.article.findFirst({ where: { sourceUrl: first.link } })
-    if (byLink) {
-      const updates: Record<string, any> = {}
-      if (!byLink.coverImage && coverImage) updates.coverImage = coverImage
-      if (!byLink.summary) updates.summary = ai.summary
-      if (!byLink.content) updates.content = ai.content
-
-      if (Object.keys(updates).length > 0) {
-        await prisma.article.update({
-          where: { id: byLink.id },
-          data: updates,
-        })
-        updated++
+        if (Object.keys(updates).length > 0) {
+          await prisma.article.update({ where: { id: byLink.id }, data: updates })
+          updated++
+        }
+        return
       }
-      continue
-    }
 
-    const uniqueSlug = await findUniqueSlug(ai.title)
+      // Nema po linku? Radi AI rewrite i kreiraj
+      const ai = await summarizeFromItem(first)
+      const category = classifyTitle(ai.title, first.link)
+      const coverImage = firstValidCover(group.map(i => i.coverUrl))
+      const publishedAt =
+        (first.isoDate ? new Date(first.isoDate) :
+         first.pubDate ? new Date(first.pubDate) : new Date())
 
-    await prisma.article.create({
-      data: {
-        country: 'rs',
-        title: ai.title,
-        slug: uniqueSlug,
-        summary: ai.summary,
-        content: ai.content,
-        coverImage,
-        sourceUrl: first.link,
-        sourcesJson: null,
-        language: 'sr',
-        publishedAt,
-        category,
-      },
+      const uniqueSlug = await findUniqueSlug(ai.title)
+
+      await prisma.article.create({
+        data: {
+          country: 'rs',
+          title: ai.title,
+          slug: uniqueSlug,
+          summary: ai.summary,
+          content: ai.content,
+          coverImage,
+          sourceUrl: first.link,
+          sourcesJson: null,
+          language: 'sr',
+          publishedAt,
+          category,
+        },
+      })
+      created++
     })
-    created++
+
+    // ne ruši batch ako jedna padne
+    await Promise.allSettled(tasks)
   }
 
   return { created, updated }
 }
 
-/** GET */
+/* -------------------------
+   Handleri
+------------------------- */
+
 export async function GET(req: Request) {
   const authErr = requireTokenOrPass(req)
   if (authErr) return authErr
 
+  const { limit, dryRun } = parseQuery(req)
+
+  if (dryRun) {
+    const groups = await gatherItems(limit)
+    const sample = groups.slice(0, 10).map(g => g[0]?.title || 'Vest')
+    return NextResponse.json({ ok: true, dryRun: true, groups: groups.length, sample })
+  }
+
   try {
-    const { created, updated } = await runIngest()
+    const { created, updated } = await runIngest(limit)
     return NextResponse.json({ ok: true, created, updated })
   } catch (e) {
     console.error(e)
@@ -246,13 +296,13 @@ export async function GET(req: Request) {
   }
 }
 
-/** POST */
 export async function POST(req: Request) {
   const authErr = requireTokenOrPass(req)
   if (authErr) return authErr
 
+  const { limit } = parseQuery(req)
   try {
-    const { created, updated } = await runIngest()
+    const { created, updated } = await runIngest(limit)
     return NextResponse.json({ ok: true, created, updated })
   } catch (e) {
     console.error(e)

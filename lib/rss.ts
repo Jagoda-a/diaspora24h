@@ -17,11 +17,10 @@ export type FeedWithItems = {
   items: RSItem[]
 }
 
+// Glavni RS izvori (IZBAČENI: b92 i 021)
 export const RS_SOURCES_RS: string[] = [
-  // RTS: glavni RSS kanali su pod-domeni i sekcije, /rss.html je HTML indeks,
-  // ali Parser će izvući <link> elemente iz <item> ako je pravi feed URL.
-  // Zato ovde koristimo konkretne feedove koje rade:
-  'https://www.rts.rs/page/stories/sr/rss.html', // Stories (radi kao RSS)
+  // Glavne redakcije i stabilni RSS-ovi
+  'https://www.rts.rs/page/stories/sr/rss.html',
   'https://n1info.rs/feed/',
   'https://nova.rs/feed/',
   'https://www.politika.rs/rss',
@@ -29,15 +28,12 @@ export const RS_SOURCES_RS: string[] = [
   'https://www.kurir.rs/rss/vesti',
   'https://www.blic.rs/rss/vesti',
   'https://www.vreme.com/feed/',
-
-  // B92: stabilniji feedovi su po sekcijama; "info.xml" često puca 404.
-  'https://www.b92.net/info/rss/vesti.xml',
-  'https://www.b92.net/sport/rss/ostali-sportovi.xml',
-
-  // 021.rs: glavni je često 404; radi po sekcijama:
-  'https://www.021.rs/rss/Novosti_1.xml',
-  'https://www.021.rs/rss/Srbija_2.xml',
-  'https://www.021.rs/rss/Novi_Sad_3.xml',
+  // Dodatno (stabilni RS/sr feedovi)
+  'https://www.nedeljnik.rs/feed/',
+  'https://novaekonomija.rs/feed',
+  // Informativni srpski feedovi van RS:
+  'https://www.bbc.com/serbian/index.xml',     // BBC na srpskom
+  'https://balkans.aljazeera.net/feed',        // Al Jazeera Balkans
 ]
 
 // Dodatni feedovi (DE tržište na srpskom)
@@ -88,7 +84,6 @@ async function fetchTextSafe(url: string): Promise<string | null> {
           'Mozilla/5.0 (compatible; diaspora24h-bot/1.0; +https://diaspora24h.vercel.app)',
         accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-      // neke redakcije blokiraju HEAD — idemo direktno na GET sa malim timeout-om
       cache: 'no-store',
     })
     if (!res.ok) return null
@@ -141,6 +136,37 @@ export function asProxiedImage(url?: string | null) {
   return `/api/img?url=${encodeURIComponent(url)}`
 }
 
+/* -------------------------
+   Dodatne male pomoćne
+------------------------- */
+
+// Skidanje uobičajenih tracking query parametara (utm_*, fbclid, gclid...)
+function stripTrackingParams(u: string): string {
+  try {
+    const url = new URL(u)
+    const bad = [
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'fbclid', 'gclid', 'igshid', 'mc_cid', 'mc_eid'
+    ]
+    bad.forEach(k => url.searchParams.delete(k))
+    // Ako ništa nije ostalo u query-ju, vrati čist link bez upitnika
+    url.search = url.searchParams.toString()
+    return url.toString()
+  } catch {
+    return u
+  }
+}
+
+// Normalizacija linka stavke (apsolutni + strip tracking)
+function normalizeItemLink(link: string): string {
+  const abs = sanitizeAbsoluteUrl(link) || link
+  return stripTrackingParams(abs)
+}
+
+/* -------------------------
+   Fetch svih feedova
+------------------------- */
+
 export async function fetchFeeds(urls: string[]): Promise<FeedWithItems[]> {
   const results: FeedWithItems[] = []
 
@@ -149,8 +175,9 @@ export async function fetchFeeds(urls: string[]): Promise<FeedWithItems[]> {
       const feed = await parser.parseURL(url)
 
       const items: RSItem[] = (feed.items || []).map((it: any) => {
-        const title = (it.title ?? '').toString().trim()
-        const link = (it.link ?? '').toString().trim()
+        const rawTitle = (it.title ?? '').toString().trim()
+        const rawLink = (it.link ?? '').toString().trim()
+        const link = normalizeItemLink(rawLink)
 
         const contentEncoded = it['content:encoded'] as string | undefined
         const content = it.content as string | undefined
@@ -169,7 +196,7 @@ export async function fetchFeeds(urls: string[]): Promise<FeedWithItems[]> {
         }
 
         return {
-          title,
+          title: rawTitle,
           link,
           contentSnippet,
           isoDate: it.isoDate,

@@ -4,6 +4,8 @@
 const AI_PROVIDER = process.env.AI_PROVIDER ?? 'openai' // 'openai' | 'none'
 const AI_MODEL = process.env.AI_MODEL ?? 'gpt-4o-mini'
 const OPENAI_KEY = process.env.OPENAI_API_KEY
+// Pismo: ARTICLE_SCRIPT=cyrl | latn  (default: cyrl)
+const ARTICLE_SCRIPT = (process.env.ARTICLE_SCRIPT ?? 'cyrl').toLowerCase() === 'latn' ? 'sr-Latn' : 'sr-Cyrl'
 
 // Tipovi
 export type AiResult = { title?: string; content: string }
@@ -126,9 +128,11 @@ export async function aiSummarize(input: {
   const sys = [
     'Ti si novinski urednik.',
     `Pišeš kratko, činjenično, na jeziku "${language}" (ekavica).`,
+    `Pismo: ${ARTICLE_SCRIPT} (isključivo to pismo; ne mešaj pisma).`,
     'Neutralan ton, bez clickbaita i bez izmišljenih činjenica.',
     'Bez šablona tipa: „uticaj na dijasporu“, „naši ljudi u…“ – nemoj to da dodaješ.',
     'Bez dupliranja rečenica i pasusa.',
+    'Pasuse odvajaj praznim redom. Ne spajaj ceo tekst u jedan blok.'
   ].join(' ')
 
   const user = [
@@ -174,7 +178,7 @@ export async function aiSummarize(input: {
 }
 
 // ---------------------------------------
-// NOVO: prepis + meta (bez dijaspore, realističan stil)
+// NOVO: prepis + meta (bez dijaspore, realističan stil, striktno pismo)
 // ---------------------------------------
 export async function aiRewrite(input: {
   sourceTitle: string
@@ -194,17 +198,19 @@ export async function aiRewrite(input: {
     return rewriteFallback(sourceTitle, plainText)
   }
 
-  // Sistem: urednik, srpski (ekavica), neutralno, bez dijaspore i šablona
+  // Sistem: urednik, srpski, striktno jedno pismo, neutralno
   const sys = [
     'Ti si novinski urednik i lektor.',
-    'Pišeš novinarski, neutralno, jasno i činjenično. Srpski jezik, ekavica.',
+    `Pišeš novinarski, neutralno, jasno i činjenično. Srpski jezik (${language}), ekavica.`,
+    `Pismo: ${ARTICLE_SCRIPT} (isključivo to pismo; ne mešaj ćirilicu i latinicu).`,
     'Bez clickbaita, bez izmišljanja, bez praznih fraza.',
-    'Ne spominji „dijasporu“, „naše ljude u inostranstvu“ i slične šablone osim ako izvor to eksplicitno navodi.',
+    'Ne spominji „dijasporu“ i slične šablone osim ako izvor to eksplicitno navodi.',
     'Dozvoljena su lična imena/funkcije (ne zamenjuj eufemizmima).',
     'Ne ponavljaj rečenice ili pasuse.',
+    'Pasuse odvajaj praznim redom. Ne spajaj ceo tekst u jedan blok.',
   ].join(' ')
 
-  // Korisnik: precizan JSON, zahtevi za dužine, stil, strukturu
+  // Korisnik: striktan JSON izlaz + pravila dužine
   const user = `
 IZVOR: ${sourceName}
 ULAZNI NASLOV: ${sourceTitle}
@@ -219,6 +225,7 @@ PRAVILA:
 - "title": 55–85 karaktera, informativan, bez clickbaita, različit od ulaznog.
 - "summary": oko 130–170 karaktera (rečenica ili dve, za meta opis).
 - "content": 2–5 pasusa, ukupno ~220–600 reči; prirodan novinski stil.
+- Pasuse OBAVEZNO odvoji praznim redom.
 - Informacije moraju biti proverljive iz teksta iznad. Ako nešto nije sigurno: označi kao nepotvrđeno.
 - Ne dodaj segmente „uticaj na dijasporu“, „posledice za dijasporu“ itd. NEMOJ dodavati takve pasuse.
 - Ne kopiraj doslovno ulazni naslov ni duge fraze iz izvora (${sourceName}); preformuliši.

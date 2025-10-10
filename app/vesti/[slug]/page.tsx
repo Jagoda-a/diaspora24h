@@ -86,7 +86,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     : undefined;
 
   const publishedIso = (a.publishedAt ?? new Date()).toISOString();
-
   const allowIndex = !a.noindex;
 
   const meta: Metadata = {
@@ -122,7 +121,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         'max-snippet': -1,
         'max-image-preview': 'large',
         'max-video-preview': -1,
-    },
+      },
     },
   };
 
@@ -400,12 +399,29 @@ export default async function ArticlePage({ params }: Props) {
 }
 
 /**
- * Najjednostavniji “renderer”:
- * - ### → <h3>, ## → <h2>
- * - dvostruki novi red → <p>
+ * Heuristike za formatiranje sadržaja
+ * - smartParagraphs: ako AI vrati jedan dugačak blok, razbij ga na pasuse po 2–3 rečenice
+ * - toHtml: ### → <h3>, ## → <h2>, dupli novi red → <p>, jedan novi red → <br/>
  */
+
+function smartParagraphs(plain: string) {
+  const hasBlankLines = /\n{2,}/.test(plain);
+  if (hasBlankLines) return plain;
+
+  // Razbij po rečenicama i grupiši po 2–3 da dobiješ pasuse
+  const sentences = plain.split(/(?<=[\.\?!])\s+(?=[A-ZČĆŽŠĐ])/u);
+  const chunks: string[] = [];
+  for (let i = 0; i < sentences.length; i += 3) {
+    chunks.push(sentences.slice(i, i + 3).join(' '));
+  }
+  return chunks.join('\n\n');
+}
+
 function toHtml(input: string) {
-  const safe = input
+  // normalizuj pasuse ako su "zbijeni"
+  const normalized = smartParagraphs(input);
+
+  const safe = normalized
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
