@@ -17,24 +17,29 @@ export type FeedWithItems = {
   items: RSItem[]
 }
 
-// Glavni RS izvori (IZBAČENI: b92 i 021)
 export const RS_SOURCES_RS: string[] = [
-  // Glavne redakcije i stabilni RSS-ovi
+  // Opšti izvori (već provereni)
   'https://www.rts.rs/page/stories/sr/rss.html',
   'https://n1info.rs/feed/',
   'https://nova.rs/feed/',
-  'https://www.politika.rs/rss',
   'https://www.danas.rs/feed/',
   'https://www.kurir.rs/rss/vesti',
   'https://www.blic.rs/rss/vesti',
   'https://www.vreme.com/feed/',
-  // Dodatno (stabilni RS/sr feedovi)
   'https://www.nedeljnik.rs/feed/',
-  'https://novaekonomija.rs/feed',
-  // Informativni srpski feedovi van RS:
-  'https://www.bbc.com/serbian/index.xml',     // BBC na srpskom
-  'https://balkans.aljazeera.net/feed',        // Al Jazeera Balkans
+  'https://novaekonomija.rs/feed/',
+  'https://www.telegraf.rs/rss',
+
+  // ➕ Sport (da ne bude sve politika)
+  'https://www.rts.rs/page/sport/sr/rss.html', // RTS Sport
+  'https://n1info.rs/sport/feed/',             // N1 Sport
+  'https://nova.rs/sport/feed/',               // Nova.rs Sport
+  'https://www.blic.rs/rss/sport',             // Blic Sport
+  'https://www.kurir.rs/rss/sport',            // Kurir Sport
+  'https://www.telegraf.rs/rss/sport',         // Telegraf Sport
+  'https://zurnal.rs/rss',                     // Sportski žurnal (RSS)
 ]
+
 
 // Dodatni feedovi (DE tržište na srpskom)
 export const RS_SOURCES_DE: string[] = [
