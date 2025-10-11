@@ -17,7 +17,7 @@ const CATS: { slug: string; title: string; img: string }[] = [
   { slug: "lifestyle",     title: "Lifestyle",     img: "lifestyle.webp" },
   { slug: "zanimljivosti", title: "Zanimljivosti", img: "zanimljivosti.webp" },
   { slug: "zdravlje",      title: "Zdravlje",      img: "zdravlje.webp" },
-  { slug: "tehnologija",   title: "Tehnologija",   img: "tech.webp" }, // ← slika je tech.webp
+  { slug: "tehnologija",   title: "Tehnologija",   img: "tech.webp" },
 ]
 
 // grupni upit: count + last
@@ -36,40 +36,57 @@ export default async function VestiKategorijePage() {
   const stats = await loadStats()
 
   return (
-    <main className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="text-2xl md:text-3xl font-semibold mb-6">Vesti po kategorijama</h1>
+    <main
+      className="container"
+      style={{
+        maxWidth: 1280,
+        margin: "0 auto",
+        padding: "16px", // ← traženi 16px margin/padding oko sadržaja
+      }}
+    >
+      <h1 style={{ fontSize: 24, fontWeight: 600, margin: "0 0 16px 0" }}>Vesti po kategorijama</h1>
 
-      <ul className="grid gap-4 md:gap-6" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-        <style
-          dangerouslySetInnerHTML={{
-            __html: `
-              @media (min-width: 640px){ ul.grid{ grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-              @media (min-width: 1024px){ ul.grid{ grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-            `,
-          }}
-        />
-        {CATS.map(cat => {
+      {/* Centrirani grid sa fiksnom širinom kartice 343px i razmacima 16px */}
+      <ul
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: 16,           // razmak horizontalno i vertikalno
+          margin: "16px 0",  // top/bottom
+          padding: 0,
+          listStyle: "none",
+        }}
+      >
+        {CATS.map((cat) => {
           const s = stats.get(cat.slug) || { count: 0, last: null }
           const href = `/vesti/k/${encodeURIComponent(cat.slug)}`
-          const webp = `/cats/${cat.img}`             // npr. tech.webp
-          const jpg  = `/cats/${cat.img.replace(/\.webp$/i, ".jpg")}`
+          const webp = `/cats/${cat.img}`
+          const jpg = `/cats/${cat.img.replace(/\.webp$/i, ".jpg")}`
           const fallback = `/cats/_fallback.webp`
 
           return (
             <li
               key={cat.slug}
-              className="card"
               style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: 16,
-                background: "#fff",
-                overflow: "hidden",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-                transition: "box-shadow .2s ease",
+                width: "min(343px, 100%)", // ≤343px na mobilnom
               }}
             >
-              <Link href={href} style={{ textDecoration: "none", color: "inherit", display: "block" }}>
-                {/* kompaktna kartica */}
+              <Link
+                href={href}
+                style={{
+                  textDecoration: "none",
+                  color: "inherit",
+                  display: "block",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 16,
+                  background: "#fff",
+                  overflow: "hidden",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                  transition: "box-shadow .2s ease",
+                }}
+              >
+                {/* COVER: fiksna visina 160px (pravougaonik) */}
                 <div style={{ width: "100%", height: 160, background: "#f3f4f6", overflow: "hidden" }}>
                   <picture>
                     <source srcSet={webp} type="image/webp" />
@@ -84,6 +101,7 @@ export default async function VestiKategorijePage() {
                   </picture>
                 </div>
 
+                {/* BODY */}
                 <div style={{ padding: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{cat.title}</h2>
@@ -102,12 +120,6 @@ export default async function VestiKategorijePage() {
           )
         })}
       </ul>
-
-      <p style={{ fontSize: 12, color: "#6b7280", marginTop: 16 }}>
-        Slike su u <code>/public/cats</code> i moraju imati ta imena: politika.webp, sport.webp, ekonomija.webp, hronika.webp,
-        svet.webp, kultura.webp, lifestyle.webp, zanimljivosti.webp, zdravlje.webp, <b>tech.webp</b>.
-        Fallback: <code>_fallback.webp</code>.
-      </p>
     </main>
   )
 }
