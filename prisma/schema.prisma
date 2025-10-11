@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"     
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -23,11 +23,22 @@ model Article {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  // NOVO: ključ teme (anti-dupe među različitim izvorima)
+  // Ostavljamo ga opcionalnim zbog postojećih redova.
+  topicKey    String?
+
+  // indeksi
   @@index([category, publishedAt])
+  @@index([createdAt])
+  @@index([sourceUrl])
+
+  // kompozitni unique: ne dozvoljava dve vesti iste teme u istoj zemlji
+  // (u Postgresu više NULL vrednosti je dozvoljeno – migracija bez zastoja)
+  @@unique([topicKey, country])
 
   translationsJson String?
 
-    // --- SEO ---
+  // --- SEO ---
   seoTitle        String?   // ručni <title> override
   seoDescription  String?   // ručni meta description
   ogImage         String?   // ručni og:image (ako želiš drugačiju od coverImage)

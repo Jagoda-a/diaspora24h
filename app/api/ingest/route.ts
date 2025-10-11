@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { slugify } from '@/lib/slug'
 import { fetchFeeds, RS_SOURCES_RS, resolveBestCover } from '@/lib/rss'
-import { aiRewrite } from '@/lib/ai'
+import { aiRewrite, isLongEnough, makeTopicKey } from '@/lib/ai'
 import { classifyTitle } from '@/lib/cats'
 
 export const dynamic = 'force-dynamic'
@@ -239,7 +239,7 @@ async function resolveCoverHard(first: FlatItem, group: FlatItem[]): Promise<str
   return null
 }
 
-/** meka deduplikacija po naslovu (poslednja 3 dana) */
+/** meka deduplikacija po naslovu (poslednja 3 dana) — koristi se za izvorni i AI naslov */
 async function looksLikeRecentDuplicateByTitle(title: string) {
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
   const probe = (title || '').slice(0, 48)
@@ -271,7 +271,7 @@ async function runIngest(limit: number) {
       const first = group[0]
       const linkCanon = first.linkCanon || canonicalizeLink(first.link) || first.link
 
-      // 0) meka deduplikacija po naslovu (ako već postoji skoro identično)
+      // 0) meka deduplikacija po izvornom naslovu (ako već postoji skoro identično)
       const recentDupe = await looksLikeRecentDuplicateByTitle(first.title || '')
       if (recentDupe) {
         // eventualno dopuni cover/summary/content ako fale
@@ -283,7 +283,7 @@ async function runIngest(limit: number) {
         if ((!recentDupe.summary || !recentDupe.content)) {
           const ai = await summarizeFromItem(first)
           if (!recentDupe.summary && ai.summary) updates.summary = ai.summary
-          if (!recentDupe.content && ai.content) updates.content = ai.content
+          if (!recentDupe.content && isLongEnough(ai.content)) updates.content = ai.content
         }
         if (Object.keys(updates).length > 0) {
           await prisma.article.update({ where: { id: recentDupe.id }, data: updates })
@@ -305,7 +305,7 @@ async function runIngest(limit: number) {
         if (!byLink.summary || !byLink.content) {
           const ai = await summarizeFromItem(first)
           if (!byLink.summary && ai.summary) updates.summary = ai.summary
-          if (!byLink.content && ai.content) updates.content = ai.content
+          if (!byLink.content && isLongEnough(ai.content)) updates.content = ai.content
         }
         if (Object.keys(updates).length > 0) {
           await prisma.article.update({ where: { id: byLink.id }, data: updates })
@@ -314,8 +314,37 @@ async function runIngest(limit: number) {
         return
       }
 
-      // 2) Novi članak
+      // 2) Priprema novog članka preko AI
       const ai = await summarizeFromItem(first)
+
+      // 2a) preskoči ako je sadržaj prekratak (< 500 karaktera)
+      if (!isLongEnough(ai.content)) {
+        // console.log('SKIP short content', first.title)
+        return
+      }
+
+      // 2b) meka deduplikacija po AI naslovu (isti raspon od 3 dana)
+      const aiRecentDupe = await looksLikeRecentDuplicateByTitle(ai.title)
+      if (aiRecentDupe) {
+        // Ako postoji bliska vest po AI naslovu, samo probaj da dopuniš što fali
+        const updates: Record<string, any> = {}
+        if (!aiRecentDupe.coverImage) {
+          const coverImage = await resolveCoverHard(first, group)
+          if (coverImage) updates.coverImage = coverImage
+        }
+        if (!aiRecentDupe.summary && ai.summary) updates.summary = ai.summary
+        if (!aiRecentDupe.content && isLongEnough(ai.content)) updates.content = ai.content
+        if (Object.keys(updates).length > 0) {
+          await prisma.article.update({ where: { id: aiRecentDupe.id }, data: updates })
+          updated++
+        }
+        return
+      }
+
+      // 2c) (opciono) topicKey za internu proveru/analitiku — ne zahteva migraciju
+      const topicKey = makeTopicKey(ai.title, ai.content)
+
+      // 3) Novi članak
       const category = classifyTitle(ai.title, first.link)
       const coverImage = await resolveCoverHard(first, group)
       const publishedAt =
@@ -333,7 +362,13 @@ async function runIngest(limit: number) {
           content: ai.content,
           coverImage,
           sourceUrl: linkCanon, // ← uvek kanonski link
-          sourcesJson: null,
+          // Ako NEMAŠ migraciju, topicKey čuvamo informativno u sourcesJson:
+          sourcesJson: JSON.stringify({
+            items: group.map(g => ({ source: g.sourceName, link: g.link })),
+            topicKey,
+          }),
+          // Ako SI uradio migraciju (kolona Article.topicKey postoji), otkomentariši:
+          topicKey,
           language: 'sr',
           publishedAt,
           category,

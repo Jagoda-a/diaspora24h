@@ -200,11 +200,15 @@ export default async function ArticlePage({ params }: Props) {
   const dek = hasBody ? (article.summary?.slice(0, 220) || '') : '';
 
   let sourceAnchor: ReactNode = null;
+  let photoCreditText: string | null = null;
+
   if (article.sourceUrl) {
     try {
       const u = new URL(article.sourceUrl);
       const brand = brandFromHost(u.host);
       const href = cleanUrl(article.sourceUrl);
+
+      // Linkovani izvor (ispod teksta kao i do sada)
       sourceAnchor = (
         <>
           Izvor{' '}
@@ -213,6 +217,9 @@ export default async function ArticlePage({ params }: Props) {
           </a>
         </>
       );
+
+      // Tekstualni foto-kredit (ispod slike, bez linka)
+      photoCreditText = `Foto: ${brand}`;
     } catch {
       const safeText = article.sourceUrl.replace(/^https?:\/\//i, '');
       sourceAnchor = (
@@ -223,6 +230,8 @@ export default async function ArticlePage({ params }: Props) {
           </a>
         </>
       );
+      // Ako URL nije validan za parsiranje, bar prikaži domen kao tekst
+      photoCreditText = `Foto: ${safeText}`;
     }
   }
 
@@ -336,6 +345,19 @@ export default async function ArticlePage({ params }: Props) {
                   loading="eager"
                   decoding="async"
                 />
+                {/* Foto izvor – čist tekst, bez linka, odmah ispod slike */}
+                {photoCreditText ? (
+                  <div
+                    className="photo-credit"
+                    style={{
+                      fontSize: 12,
+                      color: '#6b7280',
+                      marginTop: 6,
+                    }}
+                  >
+                    {photoCreditText}
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -354,15 +376,12 @@ export default async function ArticlePage({ params }: Props) {
         <div
           className="card-body"
           style={{
-            // Ako parent .card koristi grid za hero (2 kolone), ovim garantujemo da
-            // telo zauzme celu širinu (od početka slike do kraja naslova)
             gridColumn: '1 / -1',
           }}
         >
           <div
             className="prose prose-full"
             style={{
-              // ukloni bilo kakav max-width iz globalne .prose stilizacije
               maxWidth: 'none',
               width: '100%',
               lineHeight: 1.7,

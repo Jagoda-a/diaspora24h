@@ -8,6 +8,9 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY
 // UVEK LATINICA
 const TARGET_SCRIPT: 'sr-Latn' = 'sr-Latn'
 
+// Prag minimalne dužine za “potpune” vesti
+const MIN_CONTENT_CHARS = 500
+
 // Tipovi
 export type AiResult = { title?: string; content: string }
 export type AiRewriteResult = { title: string; summary: string; content: string }
@@ -161,21 +164,54 @@ const CYR_LAT_PAIRS: Array<[RegExp, string]> = [
 
 // Dodatno: homoglifovi (retko ali desi se)
 const CYR_HOMO_TO_LAT: Record<string,string> = {
-  'Ӏ':'I', '№':'No', // samo primeri; većinu hvatamo gore
+  'Ӏ':'I', '№':'No',
 }
 
 function forceLatin(s: string): string {
   if (!s) return s
-  // Brzo: ako nema ćirilice, vrati
   if (!/[\u0400-\u04FF]/.test(s)) return s
   let out = s
   for (const [rx, rep] of CYR_LAT_PAIRS) out = out.replace(rx, rep)
-  out = out.replace(/[\u0400-\u04FF]/g, ch => CYR_HOMO_TO_LAT[ch] ?? ch) // što je preostalo
+  out = out.replace(/[\u0400-\u04FF]/g, ch => CYR_HOMO_TO_LAT[ch] ?? ch)
   return out
 }
 
 function polishAndLatin(s: string): string {
   return forceLatin(polishNewsCopy(s))
+}
+
+// -----------------------------
+// Anti-dupe helpers
+// -----------------------------
+
+const RS_STOPWORDS = new Set([
+  'je','u','na','i','da','se','su','za','od','do','po','o','kod','sa','bez','ali','dok','jer','kao',
+  'kroz','pre','posle','bi','će','ne','nije','jesu','ili','te','ta','to','ti','odnosno','među','više',
+  'manje','protiv','zbog','oko','s','uz','preko'
+])
+
+function normalizeForKey(s: string) {
+  return forceLatin(String(s || ''))
+    .toLowerCase()
+    .replace(/[“”"„]/g, '')
+    .replace(/[\(\)\[\]\{\}]/g, ' ')
+    .replace(/[^a-z0-9čćšđž\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Napravi stabilan ključ teme iz naslova+teksta (koristi se za deduplikaciju u ingest-u)
+export function makeTopicKey(title?: string, body?: string) {
+  const tokens = (normalizeForKey((title || '') + ' ' + (body || '')))
+    .split(' ')
+    .filter(w => w && !RS_STOPWORDS.has(w) && w.length > 2)
+  const uniq = Array.from(new Set(tokens)).sort()
+  return uniq.slice(0, 12).join(' ')
+}
+
+// Jednostavna provera dužine sadržaja (karakteri, ne reči)
+export function isLongEnough(s?: string | null) {
+  return (String(s || '').replace(/\s+/g, ' ').trim().length) >= MIN_CONTENT_CHARS
 }
 
 // -----------------------------
@@ -304,14 +340,14 @@ ZADATAK:
 Vrati ISKLJUČIVO JSON sa ključevima: { "title": string, "summary": string, "content": string }
 
 PRAVILA:
-- "title": 55–85 karaktera, informativan, bez clickbaita, različit od ulaznog.
-- "summary": oko 130–170 karaktera (1–2 rečenice).
-- "content": 2–5 pasusa, ukupno ~220–600 reči; prirodan novinski stil.
+- "title": 55–85 karaktera, informativan, drugačiji od ulaznog (bez clickbaita).
+- "summary": ~130–170 karaktera (1–2 rečenice).
+- "content": 3–6 pasusa, ukupno ~220–600 reči, prirodan novinski stil.
 - Pasuse OBAVEZNO odvoji praznim redom.
-- Ako nešto nije sigurno, označi kao nepotvrđeno.
-- Ne kopiraj doslovno duge fraze iz izvora; preformuliši.
-- Izbegavaj duga nabrajanja.
-  `.trim()
+- Ne kopiraj fraze iz izvora; menjaj redosled informacija, sintaksu i vokabular.
+- Ukloni robotske šablone i izbegni tri tačke "..." kao popunu.
+- Ako nešto nije potvrđeno u izvoru, označi kao nepotvrđeno ili izostavi.
+`.trim()
 
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -357,22 +393,65 @@ PRAVILA:
   }
 
   // Post-proces
-  const title = clampChars(parsed.title, 90)
-  const summary = clampChars(parsed.summary, 180)
-  const content = clampChars(polishNewsCopy(parsed.content), 12000)
+  let title = clampChars(parsed.title, 90)
+  let summary = clampChars(parsed.summary, 180)
+  let content = clampChars(polishNewsCopy(parsed.content), 12000)
 
-  const minWords = 200
-  const words = content.split(/\s+/).filter(Boolean).length
-  const finalContent =
-    words < minWords
-      ? polishNewsCopy(clampWords(content + '\n\n' + clampWords(srcPlain, 50, 200), minWords, 600))
-      : content
+  // Ako je i dalje prekratko, pokušaj jednom da proširiš sadržaj
+  if (!isLongEnough(content)) {
+    try {
+      const expandPrompt = `
+Prepravi i PROŠIRI sledeći tekst vesti na srpskom (latinica), novinarski i prirodno.
+Minimum ${MIN_CONTENT_CHARS} karaktera glavnog teksta. Ne uvoditi izmišljene činjenice.
 
-  // FINAL: garantuj latinicu
+NASLOV: ${title}
+SAŽETAK: ${summary}
+TEKST:
+${content}
+
+ULAZNI TEKST ZA KONTEXT:
+${srcPlain}
+
+Vrati SAMO JSON: { "title": string, "summary": string, "content": string }
+`.trim()
+
+      const rr = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          messages: [
+            { role: 'system', content: sys },
+            { role: 'user', content: expandPrompt },
+          ],
+          temperature: 0.35,
+          presence_penalty: 0.1,
+          frequency_penalty: 0.4,
+          response_format: { type: 'json_object' },
+        }),
+      })
+
+      if (rr.ok) {
+        const dj = await rr.json().catch(() => ({}))
+        const raw2 = dj?.choices?.[0]?.message?.content?.trim() || ''
+        const p2 = safeParseRewrite(raw2)
+        if (p2?.content) {
+          title = clampChars(p2.title || title, 90)
+          summary = clampChars(p2.summary || summary, 180)
+          content = clampChars(polishNewsCopy(p2.content), 12000)
+        }
+      }
+    } catch {}
+  }
+
+  // FINAL: garantuj latinicu i vrati
   return {
     title: forceLatin(title),
     summary: forceLatin(summary),
-    content: forceLatin(finalContent),
+    content: forceLatin(content),
   }
 }
 
