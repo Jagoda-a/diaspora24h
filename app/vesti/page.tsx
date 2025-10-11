@@ -6,8 +6,7 @@ import { cache } from "react"
 export const revalidate = 600
 export const dynamic = "force-static"
 
-// ako već imaš mapu kategorija u kodu (CATS), možeš je koristiti;
-// ovde pravim minimalnu listu – prilagodi svojim slugovima:
+// Usaglasi sa svojom listom kategorija (slug = ime .webp/.jpg u public/cats)
 const CATEGORIES: { slug: string; title: string }[] = [
   { slug: "politika",    title: "Politika" },
   { slug: "sport",       title: "Sport" },
@@ -19,7 +18,6 @@ const CATEGORIES: { slug: string; title: string }[] = [
   { slug: "tehnologija", title: "Tehnologija" },
 ]
 
-// jedan grupni upit (broj + poslednji datum) – brzo
 const loadStats = cache(async () => {
   const rows = await prisma.article.groupBy({
     by: ["category"],
@@ -44,9 +42,6 @@ export default async function VestiKategorijePage() {
         {CATEGORIES.map(cat => {
           const s = stats.get(cat.slug) || { count: 0, last: null }
           const href = `/vesti/${encodeURIComponent(cat.slug)}`
-
-          // Pretpostavljamo da se fajl zove kao slug: /public/cats/{slug}.webp
-          // Ako fali .webp, pada na .jpg; ako i to fali, ide _fallback.webp
           const webp = `/cats/${cat.slug}.webp`
           const jpg  = `/cats/${cat.slug}.jpg`
           const fallback = `/cats/_fallback.webp`
@@ -55,25 +50,18 @@ export default async function VestiKategorijePage() {
             <li key={cat.slug} className="group rounded-2xl overflow-hidden border border-neutral-200 bg-white shadow-sm hover:shadow-md transition">
               <Link href={href} className="block">
                 <div className="relative w-full aspect-[4/3] bg-neutral-100 overflow-hidden">
-                  <img
-                    src={webp}
-                    alt={cat.title}
-                    loading="lazy"
-                    decoding="async"
-                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                    onError={(e) => {
-                      const img = e.currentTarget as HTMLImageElement
-                      // ako nema .webp, probaj .jpg; ako ni to nema, _fallback.webp
-                      const cur = img.getAttribute("data-state") || "webp"
-                      if (cur === "webp") {
-                        img.setAttribute("data-state", "jpg")
-                        img.src = jpg
-                      } else if (cur === "jpg") {
-                        img.setAttribute("data-state", "fallback")
-                        img.src = fallback
-                      }
-                    }}
-                  />
+                  {/* Bez event handlera: webp → jpg → fallback */}
+                  <picture>
+                    <source srcSet={webp} type="image/webp" />
+                    <source srcSet={jpg} type="image/jpeg" />
+                    <img
+                      src={fallback}
+                      alt={cat.title}
+                      loading="lazy"
+                      decoding="async"
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  </picture>
                 </div>
                 <div className="p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -95,8 +83,7 @@ export default async function VestiKategorijePage() {
       </ul>
 
       <p className="text-xs text-neutral-500 mt-6">
-        Slike se učitavaju iz <code>/public/cats</code>. Proveri da fajl postoji kao <code>{`/cats/{slug}.webp`}</code> ili <code>.jpg</code>.
-        Ako nema – koristi se <code>/cats/_fallback.webp</code>.
+        Slike su iz <code>/public/cats</code>. Pregled prvo pokušava <code>.webp</code>, zatim <code>.jpg</code>, pa zatim <code>_fallback.webp</code>.
       </p>
     </main>
   )
