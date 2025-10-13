@@ -23,19 +23,10 @@ function normalize(s: string): string {
     .replace(/[’'"]/g, '')
 }
 
-function tokenize(s: string): string[] {
-  return normalize(s)
-    .replace(/[^a-z0-9šđčćž\s\-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean)
-}
-
 function hasPhrase(text: string, phrase: string): boolean {
   const t = normalize(text)
   const p = normalize(phrase)
-  const rx = new RegExp(`(^|\\b)${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`)
+  const rx = new RegExp(`(^|\\b)${p.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}(\\b|$)`)
   return rx.test(t)
 }
 
@@ -53,18 +44,22 @@ const TIE_BREAK: Cat[] = [
   'svet', 'region', 'drustvo', 'zdravlje', 'lifestyle', 'zanimljivosti', 'tehnologija'
 ]
 
-// Veliki skupovi signala po kategorijama
-export const CATS: Record<
-  Cat,
-  {
-    keywords: string[]
-    phrases?: string[]
-    priority?: string[]
-    negatives?: string[]
-    minScore?: number
-  }
-> = {
+// ------------------------
+// Definicije kategorija
+// ------------------------
+
+type CatDef = {
+  label: string
+  keywords: string[]
+  phrases?: string[]
+  priority?: string[]
+  negatives?: string[]
+  minScore?: number
+}
+
+export const CATS: Record<Cat, CatDef> = {
   politika: {
+    label: 'Politika',
     keywords: [
       'izbor','izbore','izbori','glas','glasao','glasanje','kampanja','koalicija','opozicija',
       'parlament','skupstina','ustav','vlada','ministar','ministri','premijer','premijerski',
@@ -90,6 +85,7 @@ export const CATS: Record<
   },
 
   sport: {
+    label: 'Sport',
     keywords: [
       'sport','utakmica','rezultat','tabella','tabela','liga','kolo','derbi','turnir','kup','pobjeda','pobeda','poraz',
       'reprezentacija','selektor','trener','igrac','igrač','gol','asistencija','penal','sudija',
@@ -112,6 +108,7 @@ export const CATS: Record<
   },
 
   hronika: {
+    label: 'Hronika',
     keywords: [
       'uhapsen','uhapšen','hapsenje','hapšenje','istraga','potera','potjera',
       'nesreca','nesreća','saobracajka','saobraćajka','ud(es|ar)','krv','razbojnik','pljacka','pljačka','krađa','kradja',
@@ -133,6 +130,7 @@ export const CATS: Record<
   },
 
   ekonomija: {
+    label: 'Ekonomija',
     keywords: [
       'ekonomija','privreda','berza','trziste','tržište','akcije','obveznice','kamata','kamatna stopa','kurs',
       'inflacija','deflacija','bnp','bpd','bnp-a','bpd-a','rast','pad','recesija','budzet','budžet','deficit',
@@ -154,6 +152,7 @@ export const CATS: Record<
   },
 
   tehnologija: {
+    label: 'Tehnologija',
     keywords: [
       'tehnologija','tehnolo','tech','it','ai','vestacka inteligencija','ml','nlp','gpu','cpu','ram','ssd','chip','cip','nvidia',
       'aplikacija','app','android','ios','iphone','ipad','mac','windows','linux','kernel',
@@ -177,6 +176,7 @@ export const CATS: Record<
   },
 
   kultura: {
+    label: 'Kultura',
     keywords: [
       'kultura','film','serija','glumac','glumica','režija','rezija','kinematografija','premijera','festival',
       'teatar','pozoriste','pozorište','opera','balet','knjiga','književnost','knjizevnost','pesnik','roman','kritika',
@@ -197,6 +197,7 @@ export const CATS: Record<
   },
 
   zdravlje: {
+    label: 'Zdravlje',
     keywords: [
       'zdravlje','klinika','bolnica','ambulanta','doktori','lekar','doktor','zdravstveni','pacijent','terapija',
       'vakcina','epidemija','pandemija','virus','bakterija','simptomi','lecenje','lečenje','prevencija','ishrana'
@@ -217,6 +218,7 @@ export const CATS: Record<
   },
 
   lifestyle: {
+    label: 'Lifestyle',
     keywords: [
       'lifestyle','moda','stil','trend','saveti','zivotni stil','putovanja','putovanje','ishrana','fitnes','trening',
       'enterijer','dekor','uređenje doma','beauty','wellness','savjet','influencer'
@@ -237,6 +239,7 @@ export const CATS: Record<
   },
 
   zanimljivosti: {
+    label: 'Zanimljivosti',
     keywords: [
       'zanimljivosti','neobicno','neobično','bizarno','rekord','viralno','kuriozitet','neobican','neobičan','neverovatno'
     ],
@@ -254,6 +257,7 @@ export const CATS: Record<
   },
 
   svet: {
+    label: 'Svet',
     keywords: [
       'svet','globalno','medjunarodno','međunarodno','diplomatija','geopolitika','un','nato','eu','sad','usa',
       'kina','rusija','ukrajina','bliski istok','bliski istoku','bliski istoka','gaza','izra( e)?l','palestina'
@@ -271,6 +275,7 @@ export const CATS: Record<
   },
 
   region: {
+    label: 'Region',
     keywords: [
       'region','balkan','srbija','hrvatska','bosna','bih','crna gora','cg','slovenija','makedonija','severna makedonija','albanija','kosovo','pristina','priština','banja luka','banjaluka',
       'novi sad','nis','niš','kragujevac','subotica','novi pazar'
@@ -288,6 +293,7 @@ export const CATS: Record<
   },
 
   drustvo: {
+    label: 'Društvo',
     keywords: [
       'drustvo','društvo','obrazovanje','skola','škola','ucenik','učenik','fakultet','univerzitet','socijalno',
       'zdravstvo','penzija','penzije','demografija','porodica','lokalno','komunalno','saobracaj','saobraćaj'
@@ -306,15 +312,20 @@ export const CATS: Record<
   },
 }
 
-// Dodatni eksporti koje traži build
+// Dodatni eksporti za UI i validacije
 export const CAT_KEYS = Object.keys(CATS) as Cat[]
+export const CAT_LABELS: Record<Cat, string> = Object.fromEntries(
+  (Object.keys(CATS) as Cat[]).map((k) => [k, CATS[k].label])
+) as Record<Cat, string>
 
-// Validacija kategorije (tražena u backfill-u)
+// Validacija kategorije
 export function isValidCat(x: string | null | undefined): x is Cat {
   return !!x && (CAT_KEYS as string[]).includes(x)
 }
 
-// Glavna klasifikacija (drugi param može biti summary, opis ili bilo kakav hint tekst)
+// ------------------------
+// Klasifikator
+// ------------------------
 export function classifyTitle(title: string, hint?: string | null): Cat {
   const textRaw = `${title || ''} ${hint || ''}`
   const t = normalize(textRaw)
@@ -340,7 +351,7 @@ export function classifyTitle(title: string, hint?: string | null): Cat {
 
     // Obične ključne reči (granice reči)
     for (const kw of cfg.keywords) {
-      const rx = new RegExp(`(^|\\b)${normalize(kw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`)
+      const rx = new RegExp(`(^|\\b)${normalize(kw).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}(\\b|$)`)
       if (rx.test(t)) score += W.token
     }
 
