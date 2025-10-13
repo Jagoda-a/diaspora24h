@@ -71,12 +71,6 @@ function clampChars(s: string, max: number): string {
   return t.slice(0, max - 1).trimEnd() + '…'
 }
 
-function clampWords(s: string, minW: number, maxW: number): string {
-  const words = squeezeWhitespace(s).split(/\s+/)
-  const n = Math.max(minW, Math.min(maxW, words.length))
-  return words.slice(0, n).join(' ')
-}
-
 function isJsonObject(str: string): boolean {
   try {
     const v = JSON.parse(str)
@@ -151,7 +145,7 @@ const CYR_LAT_PAIRS: Array<[RegExp, string]> = [
   // џ/Џ već iznad
   [/(Ш)/g, 'Š'],  [/(ш)/g, 'š'],
 
-  // Van-srpska ćirilica (često upadne iz copy/paste) — aproksimacije:
+  // Van-srpska ćirilica — aproksimacije:
   [/(Й)/g, 'J'],  [/(й)/g, 'j'],
   [/(Ы)/g, 'Y'],  [/(ы)/g, 'y'],
   [/(Э)/g, 'E'],  [/(э)/g, 'e'],
@@ -162,10 +156,8 @@ const CYR_LAT_PAIRS: Array<[RegExp, string]> = [
   [/(І)/g, 'I'],  [/(і)/g, 'i'],
 ]
 
-// Dodatno: homoglifovi (retko ali desi se)
-const CYR_HOMO_TO_LAT: Record<string,string> = {
-  'Ӏ':'I', '№':'No',
-}
+// Homoglifovi
+const CYR_HOMO_TO_LAT: Record<string,string> = { 'Ӏ':'I', '№':'No' }
 
 function forceLatin(s: string): string {
   if (!s) return s
@@ -215,6 +207,38 @@ export function isLongEnough(s?: string | null) {
 }
 
 // -----------------------------
+// Sličnost (Jaccard po tokenima)
+// -----------------------------
+function jaccard(a: string, b: string) {
+  const A = new Set(forceLatin(a).toLowerCase().split(/\W+/).filter(Boolean))
+  const B = new Set(forceLatin(b).toLowerCase().split(/\W+/).filter(Boolean))
+  const inter = [...A].filter(x => B.has(x)).length
+  const uni = new Set([...A, ...B]).size || 1
+  return inter / uni
+}
+
+// -----------------------------
+// Sanitizacija polja (bez “Sažetak”/“Napomena”)
+// -----------------------------
+function stripBannedPrefixes(s: string) {
+  return (s || '')
+    .replace(/^\s*(sažetak|sazetak)\s*[:\-]\s*/i, '')
+    .replace(/^\s*\[(sažetak|sazetak)\]\s*/i, '')
+    .trim()
+}
+function stripNotes(s: string) {
+  // ukloni linije tipa "Napomena: ..."
+  return (s || '').replace(/^\s*napomena\s*:\s*.*$/gim, '').trim()
+}
+function sanitizeRewrite(res: { title: string; summary: string; content: string }) {
+  return {
+    title: stripBannedPrefixes(res.title),
+    summary: stripBannedPrefixes(res.summary),
+    content: stripNotes(res.content),
+  }
+}
+
+// -----------------------------
 // STARO (sumarizacija za UI)
 // -----------------------------
 export async function aiSummarize(input: {
@@ -224,7 +248,7 @@ export async function aiSummarize(input: {
 }): Promise<AiResult> {
   const { title, plainText, language = 'sr' } = input
 
-  // Normalizuj ulaz (da i model radi nad latinicom)
+  // Normalizuj ulaz
   const srcTitle = forceLatin(title)
   const srcPlain = forceLatin(plainText)
 
@@ -236,11 +260,11 @@ export async function aiSummarize(input: {
   const sys = [
     'Ti si novinski urednik.',
     `Pišeš kratko, činjenično, na jeziku "${language}" (ekavica).`,
-    `Pismo: ${TARGET_SCRIPT} (isključivo latinica; ne mešaj pisma).`,
+    `Pismo: ${TARGET_SCRIPT} (isključivo latinica).`,
     'Neutralan ton, bez clickbaita i bez izmišljenih činjenica.',
-    'Bez šablona tipa: „uticaj na dijasporu“, „naši ljudi u…“ – nemoj to da dodaješ.',
+    'Bez šablona tipa: „uticaj na dijasporu“ – nemoj to da dodaješ.',
     'Bez dupliranja rečenica i pasusa.',
-    'Pasuse odvajaj praznim redom. Ne spajaj ceo tekst u jedan blok.'
+    'Pasuse odvajaj praznim redom.'
   ].join(' ')
 
   const user = [
@@ -251,7 +275,7 @@ export async function aiSummarize(input: {
     'ZADATAK:',
     '- Napiši kratak članak 2–4 pasusa (ukupno ~120–220 reči).',
     '- Ne ponavljaj iste informacije.',
-    '- Bez uvoda koji ne dodaje vrednost (idi direktno u činjenice).',
+    '- Bez generičkih uvoda.',
   ].join('\n')
 
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -319,100 +343,97 @@ export async function aiRewrite(input: {
     }
   }
 
-  const sys = [
-    'Ti si novinski urednik i lektor.',
-    `Pišeš novinarski, neutralno, jasno i činjenično. Srpski jezik (${language}), ekavica.`,
-    `Pismo: ${TARGET_SCRIPT} (isključivo latinica; ne mešaj ćirilicu i latinicu).`,
-    'Bez clickbaita, bez izmišljanja, bez praznih fraza.',
-    'Ne spominji „dijasporu“ osim ako izvor to eksplicitno navodi.',
-    'Dozvoljena su lična imena/funkcije.',
-    'Ne ponavljaj rečenice/pasuse; pasuse odvajaj praznim redom.',
-  ].join(' ')
+  async function call(stronger = false) {
+    const sys = [
+      'Pišeš novinski članak na srpskom (latinica).',
+      `Jezik: ${language}, ekavica. Pismo: ${TARGET_SCRIPT}.`,
+      'Stil: neutralan, jasan; bez senzacionalizma; bez izmišljenih činjenica.',
+      'ZABRANJENO: reč "Sažetak" ili "Napomena" u bilo kom polju.',
+      'Ne kopiraj rečenice iz izvora — menjaj redosled i vokabular.',
+      stronger ? 'Pojačaj parafraziranje — veća distanca od originala.' : '',
+      'Vrati isključivo JSON { "title": string, "summary": string, "content": string }.',
+      'title: 55–78 karaktera, bez navodnika/brenda; summary: 120–220 karaktera; content: 700–1500 karaktera, 4–8 pasusa.',
+    ].filter(Boolean).join('\n')
 
-  const user = `
+    const user = `
 IZVOR: ${sourceName}
 ULAZNI NASLOV: ${srcTitle}
 
 TEKST (plain):
-${srcPlain}
-
-ZADATAK:
-Vrati ISKLJUČIVO JSON sa ključevima: { "title": string, "summary": string, "content": string }
-
-PRAVILA:
-- "title": 55–85 karaktera, informativan, drugačiji od ulaznog (bez clickbaita).
-- "summary": ~130–170 karaktera (1–2 rečenice).
-- "content": 3–6 pasusa, ukupno ~220–600 reči, prirodan novinski stil.
-- Pasuse OBAVEZNO odvoji praznim redom.
-- Ne kopiraj fraze iz izvora; menjaj redosled informacija, sintaksu i vokabular.
-- Ukloni robotske šablone i izbegni tri tačke "..." kao popunu.
-- Ako nešto nije potvrđeno u izvoru, označi kao nepotvrđeno ili izostavi.
+"""${srcPlain}"""
 `.trim()
 
-  const r = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENAI_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      messages: [
-        { role: 'system', content: sys },
-        { role: 'user', content: user },
-      ],
-      temperature: 0.35,
-      presence_penalty: 0.1,
-      frequency_penalty: 0.4,
-      response_format: { type: 'json_object' },
-    }),
-  })
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: user },
+        ],
+        temperature: stronger ? 0.9 : 0.6,
+        presence_penalty: stronger ? 0.2 : 0.1,
+        frequency_penalty: stronger ? 0.5 : 0.35,
+        response_format: { type: 'json_object' },
+      }),
+    })
 
-  if (!r.ok) {
-    const txt = await r.text().catch(() => '')
-    console.warn('AI rewrite error:', r.status, txt)
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '')
+      console.warn('AI rewrite error:', r.status, txt)
+      return null
+    }
+    const data = await r.json().catch(() => ({}))
+    const raw = data?.choices?.[0]?.message?.content?.trim() || ''
+    const parsed = safeParseRewrite(raw)
+    return parsed ? sanitizeRewrite(parsed) : null
+  }
+
+  // 1) prvi prolaz
+  let out = await call(false)
+
+  // fallback na null
+  if (!out) {
     const fb = rewriteFallback(srcTitle, srcPlain)
-    return {
-      title: polishAndLatin(fb.title),
-      summary: polishAndLatin(fb.summary),
-      content: polishAndLatin(fb.content),
+    out = sanitizeRewrite(fb)
+  }
+
+  // 2) ako je previše slično ili uđe “sažetak”, radi jači prolaz
+  const tooSimilar =
+    jaccard(srcTitle, out!.title) > 0.6 ||
+    jaccard(srcPlain, out!.content) > 0.45 ||
+    /sažetak|sazetak/i.test(out!.title) ||
+    /sažetak|sazetak/i.test(out!.summary)
+
+  if (tooSimilar) {
+    const second = await call(true)
+    if (second && isLongEnough(second.content)) {
+      out = sanitizeRewrite(second)
     }
   }
 
-  const data = await r.json().catch(() => ({}))
-  const raw = data?.choices?.[0]?.message?.content?.trim() || ''
-  const parsed = safeParseRewrite(raw)
-  if (!parsed) {
-    console.warn('AI rewrite JSON parse error, raw:', raw.slice(0, 300))
-    const fb = rewriteFallback(srcTitle, srcPlain)
-    return {
-      title: polishAndLatin(fb.title),
-      summary: polishAndLatin(fb.summary),
-      content: polishAndLatin(fb.content),
-    }
-  }
-
-  // Post-proces
-  let title = clampChars(parsed.title, 90)
-  let summary = clampChars(parsed.summary, 180)
-  let content = clampChars(polishNewsCopy(parsed.content), 12000)
-
-  // Ako je i dalje prekratko, pokušaj jednom da proširiš sadržaj
-  if (!isLongEnough(content)) {
+  // 3) ako je prekratko, probaj još jednom da proširiš
+  if (!isLongEnough(out!.content)) {
     try {
-      const expandPrompt = `
-Prepravi i PROŠIRI sledeći tekst vesti na srpskom (latinica), novinarski i prirodno.
-Minimum ${MIN_CONTENT_CHARS} karaktera glavnog teksta. Ne uvoditi izmišljene činjenice.
+      const sys = [
+        'Uredi i proširi vest, novinarski stil (latinica).',
+        `Jezik: ${language}, ekavica. Minimalno ${MIN_CONTENT_CHARS} karaktera sadržaja.`,
+        'ZABRANJENO: reč "Sažetak" ili "Napomena".',
+        'Vrati JSON { "title": string, "summary": string, "content": string }.',
+      ].join('\n')
 
-NASLOV: ${title}
-SAŽETAK: ${summary}
+      const prompt = `
+NASLOV: ${out!.title}
+SAZETAK: ${out!.summary}
 TEKST:
-${content}
+${out!.content}
 
-ULAZNI TEKST ZA KONTEXT:
+ULAZNI KONTEKST (izvor):
 ${srcPlain}
-
-Vrati SAMO JSON: { "title": string, "summary": string, "content": string }
 `.trim()
 
       const rr = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -425,11 +446,11 @@ Vrati SAMO JSON: { "title": string, "summary": string, "content": string }
           model: AI_MODEL,
           messages: [
             { role: 'system', content: sys },
-            { role: 'user', content: expandPrompt },
+            { role: 'user', content: prompt },
           ],
-          temperature: 0.35,
+          temperature: 0.5,
           presence_penalty: 0.1,
-          frequency_penalty: 0.4,
+          frequency_penalty: 0.35,
           response_format: { type: 'json_object' },
         }),
       })
@@ -439,24 +460,26 @@ Vrati SAMO JSON: { "title": string, "summary": string, "content": string }
         const raw2 = dj?.choices?.[0]?.message?.content?.trim() || ''
         const p2 = safeParseRewrite(raw2)
         if (p2?.content) {
-          title = clampChars(p2.title || title, 90)
-          summary = clampChars(p2.summary || summary, 180)
-          content = clampChars(polishNewsCopy(p2.content), 12000)
+          out = sanitizeRewrite({
+            title: clampChars(p2.title || out!.title, 90),
+            summary: clampChars(p2.summary || out!.summary, 180),
+            content: clampChars(polishNewsCopy(p2.content), 12000),
+          })
         }
       }
     } catch {}
   }
 
-  // FINAL: garantuj latinicu i vrati
+  // FINAL: poliranje + latinica
   return {
-    title: forceLatin(title),
-    summary: forceLatin(summary),
-    content: forceLatin(content),
+    title: forceLatin(clampChars(out!.title, 90)),
+    summary: forceLatin(clampChars(out!.summary, 180)),
+    content: forceLatin(clampChars(polishNewsCopy(out!.content), 12000)),
   }
 }
 
 // -----------------------------
-// Fallback-ovi
+// Fallback-ovi (bez “Sažetak”/“Napomena”)
 // -----------------------------
 function fallback(plainText: string, title?: string): AiResult {
   const sentences = (plainText || '')
@@ -469,12 +492,11 @@ function fallback(plainText: string, title?: string): AiResult {
 }
 
 function rewriteFallback(sourceTitle: string, plainText: string): AiRewriteResult {
+  // Ne koristimo "Sažetak"/"Napomena"
   const base = fallback(plainText, sourceTitle).content
-  const makeTitle = (t: string) => clampChars((t || 'Vest').replace(/\s+/g, ' '), 85)
-  const title = makeTitle(`Sažetak: ${sourceTitle}`)
-  const summary = clampChars(base.replace(/\s+/g, ' '), 170)
-  const content = polishAndLatin(
-    [base, '', 'Napomena: Tekst je sažet iz dostupnih informacija; biće dopunjen po potrebi.'].join('\n\n')
-  )
+  const cleanTitle = clampChars((sourceTitle || 'Vest').replace(/[“”"„]/g, '').trim(), 85)
+  const title = cleanTitle // dozvoljavamo fallback da koristi (skraćeni) izvorni naslov
+  const summary = clampChars(polishAndLatin(base), 170)
+  const content = polishAndLatin(base)
   return { title, summary, content }
 }

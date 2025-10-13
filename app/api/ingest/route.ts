@@ -367,7 +367,9 @@ async function runIngest(limit: number) {
       if (recentDupe) {
         const updates: Record<string, any> = {}
         if (!recentDupe.coverImage) {
-          const coverImage = await resolveCoverHard(first, group)
+          const coverImageResolved = await resolveCoverHard(first, group)
+          const catForFallback = recentDupe.category || 'drustvo'
+          const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
         }
         if ((!recentDupe.summary || !recentDupe.content)) {
@@ -389,7 +391,9 @@ async function runIngest(limit: number) {
       if (byLink) {
         const updates: Record<string, any> = {}
         if (!byLink.coverImage) {
-          const coverImage = await resolveCoverHard(first, group)
+          const coverImageResolved = await resolveCoverHard(first, group)
+          const catForFallback = byLink.category || 'drustvo'
+          const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
         }
         if (!byLink.summary || !byLink.content) {
@@ -415,7 +419,9 @@ async function runIngest(limit: number) {
       if (aiRecentDupe) {
         const updates: Record<string, any> = {}
         if (!aiRecentDupe.coverImage) {
-          const coverImage = await resolveCoverHard(first, group)
+          const coverImageResolved = await resolveCoverHard(first, group)
+          const catForFallback = aiRecentDupe.category || 'drustvo'
+          const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
         }
         if (!aiRecentDupe.summary && ai.summary) updates.summary = ai.summary
@@ -431,8 +437,13 @@ async function runIngest(limit: number) {
       const topicKey = makeTopicKey(ai.title, ai.content)
 
       // 3) Novi članak
-      const category = classifyTitle(ai.title, first.link)
-      const coverImage = await resolveCoverHard(first, group)
+      // *** BITNO: klasifikacija po naslovu + summary/content (ne po linku) ***
+      const category = classifyTitle(ai.title, ai.summary || ai.content)
+
+      // Pokušaj da nađeš cover; ako nema – kategorijski fallback
+      const coverImageResolved = await resolveCoverHard(first, group)
+      const coverImage = coverImageResolved || `/cats/${category}.webp`
+
       const publishedAt =
         (first.isoDate ? new Date(first.isoDate) :
          first.pubDate ? new Date(first.pubDate) : new Date())
