@@ -3,11 +3,22 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { prisma } from '@/lib/db'
 import ArticleCard from '@/components/ArticleCard'
-import { CATS, CAT_KEYS, type Cat } from '@/lib/cats'
+import { CAT_KEYS, type Cat } from '@/lib/cats'
 
-type Props = {
-  params: { category: Cat }
-  searchParams?: { page?: string }
+// Lokalna mapa za prikazne nazive (ne zavisimo od CATS.label)
+const LABELS: Record<Cat, string> = {
+  politika: 'Politika',
+  hronika: 'Hronika',
+  sport: 'Sport',
+  ekonomija: 'Ekonomija',
+  tehnologija: 'Tehnologija',
+  kultura: 'Kultura',
+  zdravlje: 'Zdravlje',
+  lifestyle: 'Lifestyle',
+  zanimljivosti: 'Zanimljivosti',
+  svet: 'Svet',
+  region: 'Region',
+  drustvo: 'Društvo',
 }
 
 // ISR + statički render (mnogo brže od force-dynamic)
@@ -17,6 +28,11 @@ export const revalidate = 300
 // Koliko kartica po strani
 const PAGE_SIZE = 24
 
+type Props = {
+  params: { category: Cat }
+  searchParams?: { page?: string }
+}
+
 export function generateStaticParams() {
   return CAT_KEYS
     .filter((k) => k !== ('nepoznato' as any))
@@ -25,7 +41,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const catKey = CAT_KEYS.includes(params.category) ? params.category : 'drustvo'
-  const label = CATS[catKey]?.label ?? 'Vesti'
+  const label = LABELS[catKey] ?? 'Vesti'
   return {
     title: `Vesti – ${label}`,
     description: `Najnovije vesti iz kategorije: ${label}.`,
@@ -34,19 +50,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function CatPage({ params, searchParams }: Props) {
   const catKey: Cat = CAT_KEYS.includes(params.category) ? params.category : 'drustvo'
-  const catDef = CATS[catKey]
-
-  if (!catDef) {
-    return (
-      <main className="container" style={{ padding: '16px 0 32px' }}>
-        <h1>Vesti</h1>
-        <p>Nepoznata kategorija.</p>
-        <p><Link href="/vesti">Nazad na kategorije</Link></p>
-      </main>
-    )
-  }
+  const label = LABELS[catKey] ?? 'Vesti'
 
   const page = Math.max(1, parseInt(String(searchParams?.page ?? '1'), 10) || 1)
+
   const [total, items] = await Promise.all([
     prisma.article.count({ where: { category: catKey } }),
     prisma.article.findMany({
@@ -73,8 +80,10 @@ export default async function CatPage({ params, searchParams }: Props) {
   return (
     <main className="container" style={{ padding: '16px 0 32px' }}>
       <div className="flex items-center justify-between gap-4 mb-3">
-        <h1 style={{ fontSize: '22px', margin: 0 }}>Vesti – {catDef.label}</h1>
-        <span className="text-sm text-neutral-500">{total} {total === 1 ? 'vest' : 'vesti'}</span>
+        <h1 style={{ fontSize: '22px', margin: 0 }}>Vesti – {label}</h1>
+        <span className="text-sm text-neutral-500">
+          {total} {total === 1 ? 'vest' : 'vesti'}
+        </span>
       </div>
 
       {items.length === 0 && <p>Nema još vesti u ovoj kategoriji.</p>}
