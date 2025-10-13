@@ -45,12 +45,10 @@ export default function AdminList() {
       const data = await res.json()
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'fetch_failed')
 
-      if (reset) {
-        setRows(data.items)
-      } else {
-        setRows(prev => [...prev, ...data.items])
-      }
-      setNextCursor(data.nextCursor)
+      const items: Row[] = data.items || []
+      setRows(prev => reset ? items : [...prev, ...items])
+      setNextCursor(data.nextCursor || null)
+      if (!reset) setCursor(data.nextCursor || null)
     } catch (e: any) {
       setErr(e?.message || 'Greška pri učitavanju')
     } finally {
@@ -58,11 +56,7 @@ export default function AdminList() {
     }
   }
 
-  useEffect(() => {
-    // inicijalno
-    fetchPage(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useEffect(() => { fetchPage(true) }, [])
 
   function applyFilters(e: React.FormEvent) {
     e.preventDefault()
@@ -84,25 +78,21 @@ export default function AdminList() {
       const data = await res.json()
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'update_failed')
 
-      // lokalno osveži
       setRows(prev => prev.map(r => r.id === row.id ? {
         ...r,
         publishedAt: newPublishedAt,
         computedStatus: newPublishedAt ? 'published' : 'draft',
       } : r))
 
-      // revalidate tag + paths
       await fetch('/api/admin/revalidate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          slug: row.slug,
-          tags: ['articles', `article:${row.slug}`]
-        })
-      })
-      setMessage('Osvežen keš.')
+        body: JSON.stringify({ slug: row.slug, tags: ['articles', `article:${row.slug}`] })
+      }).catch(() => {})
+
+      setMessage('Status ažuriran.')
     } catch (e: any) {
-      setErr(e?.message || 'Greška pri publish/unpublish')
+      setErr(e?.message || 'Greška pri ažuriranju')
     }
   }
 
@@ -112,37 +102,62 @@ export default function AdminList() {
       await fetch('/api/admin/revalidate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          slug: row.slug,
-          tags: ['articles', `article:${row.slug}`]
-        })
+        body: JSON.stringify({ slug: row.slug, tags: ['articles', `article:${row.slug}`] })
       })
-      setMessage('Revalidate OK.')
+      setMessage('Revalidacija poslata.')
+    } catch {
+      setErr('Greška pri revalidaciji')
+    }
+  }
+
+  async function deleteRow(row: Row) {
+    if (!confirm(`Obrisati vest: "${row.title}"?`)) return
+    try {
+      setMessage(null)
+      const res = await fetch(`/api/admin/article/${encodeURIComponent(row.id)}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'delete_failed')
+
+      setRows(prev => prev.filter(r => r.id !== row.id))
+
+      // pokušaj revalidacije stranice vesti i listinga
+      await fetch('/api/admin/revalidate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: row.slug, tags: ['articles', `article:${row.slug}`] })
+      }).catch(() => {})
+
+      setMessage('Vest obrisana.')
     } catch (e: any) {
-      setErr(e?.message || 'Revalidate greška')
+      setErr(e?.message || 'Greška pri brisanju')
     }
   }
 
   async function loadMore() {
-    if (!nextCursor) return
+    if (!nextCursor || loading) return
     setCursor(nextCursor)
     await fetchPage(false)
   }
 
   return (
-    <section style={{ padding: 16, border: '1px solid #ddd', borderRadius: 12 }}>
-      <h2 style={{ margin: 0, marginBottom: 12, fontSize: 18 }}>Poslednje vesti</h2>
+    <section>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Poslednje vesti</h2>
+        <a href="/admin/new" style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #d1d5db', textDecoration: 'none' }}>
+          + Nova vest
+        </a>
+      </div>
 
       <form onSubmit={applyFilters} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Pretraga (naslov/slug)" style={{ padding: 8, border: '1px solid #ccc', borderRadius: 8 }} />
-        <select value={status} onChange={e => setStatus(e.target.value)} style={{ padding: 8, border: '1px solid #ccc', borderRadius: 8 }}>
-          <option value="">Status (sve)</option>
-          <option value="published">Published</option>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Pretraga…" />
+        <select value={status} onChange={e => setStatus(e.target.value)}>
+          <option value="">Status</option>
+          <option value="published">Objavljeno</option>
           <option value="draft">Draft</option>
         </select>
-        <input value={country} onChange={e => setCountry(e.target.value)} placeholder="Country" style={{ padding: 8, border: '1px solid #ccc', borderRadius: 8, width: 100 }} />
-        <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Category" style={{ padding: 8, border: '1px solid #ccc', borderRadius: 8, width: 140 }} />
-        <button type="submit" disabled={loading} style={{ padding: '8px 14px' }}>{loading ? 'Učitavam…' : 'Primeni'}</button>
+        <input value={country} onChange={e => setCountry(e.target.value)} placeholder="Zemlja (npr. RS)" style={{ width: 120 }} />
+        <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Kategorija" style={{ width: 180 }} />
+        <button type="submit" disabled={loading}>Primeni</button>
       </form>
 
       {err && <p style={{ color: '#b00' }}>{err}</p>}
@@ -202,14 +217,20 @@ export default function AdminList() {
                   <a href={`/vesti/${r.slug}`} target="_blank" rel="noreferrer" style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 8 }}>
                     Otvori
                   </a>
+                  <a href={`/admin/article/${r.id}`} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 8 }}>
+                    Izmeni
+                  </a>
                   <button onClick={() => revalidateRow(r)} style={{ padding: '6px 10px' }}>
                     Revalidate
+                  </button>
+                  <button onClick={() => deleteRow(r)} style={{ padding: '6px 10px', color: '#b00', border: '1px solid #f1c5c5', borderRadius: 8, background: '#fff5f5' }}>
+                    Obriši
                   </button>
                 </td>
               </tr>
             ))}
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={7} style={{ padding: 12, color: '#777' }}>Nema rezultata.</td></tr>
+              <tr><td colSpan={7} style={{ padding: 20, color: '#777' }}>Nema rezultata.</td></tr>
             )}
           </tbody>
         </table>

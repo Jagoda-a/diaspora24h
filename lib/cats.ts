@@ -54,7 +54,7 @@ const TIE_BREAK: Cat[] = [
 ]
 
 // Veliki skupovi signala po kategorijama
-const CATS: Record<
+export const CATS: Record<
   Cat,
   {
     keywords: string[]
@@ -125,9 +125,9 @@ const CATS: Record<
       'ubistvo','uhapsen','uhapšen','preminuo','preminula','poginuo','silovanje','razbojništvo','pljacka','pljačka'
     ],
     negatives: [
-      'premijera','glumac','glumica','film','serija','festival', // ide ka kulturi
-      'mundijal','utakmica','gol',                               // ide ka sportu
-      'izbori','vlada','ministar'                               // ide ka politici
+      'premijera','glumac','glumica','film','serija','festival',
+      'mundijal','utakmica','gol',
+      'izbori','vlada','ministar'
     ],
     minScore: 3,
   },
@@ -173,7 +173,7 @@ const CATS: Record<
       'mundijal','utakmica','gol','reprezentacija',
       'glumica','glumac','film','serija','festival',
     ],
-    minScore: 4, // dignuto posebno da ne “guta” sve
+    minScore: 4,
   },
 
   kultura: {
@@ -306,9 +306,17 @@ const CATS: Record<
   },
 }
 
-// Glavna klasifikacija
-export function classifyTitle(title: string, summary?: string | null): Cat {
-  const textRaw = `${title || ''} ${summary || ''}`
+// Dodatni eksporti koje traži build
+export const CAT_KEYS = Object.keys(CATS) as Cat[]
+
+// Validacija kategorije (tražena u backfill-u)
+export function isValidCat(x: string | null | undefined): x is Cat {
+  return !!x && (CAT_KEYS as string[]).includes(x)
+}
+
+// Glavna klasifikacija (drugi param može biti summary, opis ili bilo kakav hint tekst)
+export function classifyTitle(title: string, hint?: string | null): Cat {
+  const textRaw = `${title || ''} ${hint || ''}`
   const t = normalize(textRaw)
 
   let best: { cat: Cat; score: number } | null = null
@@ -344,7 +352,7 @@ export function classifyTitle(title: string, summary?: string | null): Cat {
   const strongKultura = /(glumic|glumac|film|serij|holivud|hollywood|oscars)/.test(t)
   if (strongKultura) return 'kultura'
 
-  // Minimalni prag po kategoriji: ako top ne zadovolji prag, pokušaj po TIE_BREAK
+  // Minimalni prag po kategoriji
   if (best) {
     const min = CATS[best.cat].minScore ?? 1
     if (best.score < min) {
@@ -368,5 +376,3 @@ export function classifyTitle(title: string, summary?: string | null): Cat {
 
   return 'drustvo'
 }
-
-
