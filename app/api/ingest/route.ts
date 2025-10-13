@@ -9,6 +9,10 @@ import { classifyTitle } from '@/lib/cats'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+/* -------------------------
+   Tipovi
+------------------------- */
+
 type FlatItem = {
   sourceName: string
   title: string
@@ -122,6 +126,27 @@ async function summarizeFromItem(item: FlatItem) {
   return ai
 }
 
+// Fisher–Yates shuffle
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+
+// Quiet hours 01–05 Europe/Belgrade
+function isQuietHoursBelgrade(): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Belgrade',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date())
+  const hourStr = parts.find(p => p.type === 'hour')?.value || '00'
+  const hour = Number(hourStr)
+  return hour >= 1 && hour < 5
+}
+
 /* -------------------------
    Auth + query params
 ------------------------- */
@@ -149,7 +174,8 @@ function requireTokenOrPass(req: Request): NextResponse | null {
 
 function parseQuery(req: Request) {
   const url = new URL(req.url)
-  const limit = Math.max(1, Math.min(+(url.searchParams.get('limit') ?? 10), 25))
+  // default 12 (svakih 12 min), cap 25
+  const limit = Math.max(1, Math.min(+(url.searchParams.get('limit') ?? 12), 25))
   const dryRun = url.searchParams.get('dryRun') === '1'
   return { limit, dryRun }
 }
@@ -158,21 +184,36 @@ function parseQuery(req: Request) {
    Ingest
 ------------------------- */
 
-async function gatherItems(limit: number) {
+// Randomizovan izbor: max 2 po izvoru, ukupno do `limit`.
+// Grupisanje po canonical linku (ili čistom linku) da spojimo duplikate.
+async function gatherItems(limit: number): Promise<FlatItem[][]> {
   const feeds = await fetchFeeds(RS_SOURCES_RS)
+  shuffle(feeds)
 
-  const allItems: FlatItem[] = []
+  const PER_SOURCE_MAX = 2
+  const perSourceCount = new Map<string, number>()
+  const selected: FlatItem[] = []
+  let picked = 0
+
+  // prvi prolaz — do 2 po izvoru (nasumičan redosled izvora i stavki)
   for (const f of feeds) {
+    if (picked >= limit) break
     const fallbackHost = (() => { try { return new URL(f.url).host } catch { return 'unknown' } })()
-    for (const it of f.items as any[]) {
+    const items = Array.isArray(f.items) ? [...(f.items as any[])] : []
+    shuffle(items)
+
+    for (const it of items) {
+      if (picked >= limit) break
       const host = (() => {
         try { return new URL(it.link).hostname } catch { return fallbackHost }
       })()
 
+      const used = perSourceCount.get(host) || 0
+      if (used >= PER_SOURCE_MAX) continue
+
       const contentHtml: string | undefined =
         it['content:encoded'] || it.contentHtml || it.content || undefined
 
-      // enclosure (ako je image)
       let fromEnclosure: string | null = null
       if (it.enclosure?.url) {
         const type = String(it.enclosure.type || '').toLowerCase()
@@ -181,15 +222,13 @@ async function gatherItems(limit: number) {
           fromEnclosure = url
         }
       }
-
-      // relativni src rešavamo prema it.link
       const fromHtml = extractImageUrl(contentHtml || it.contentSnippet, it.link)
 
       const linkCanon = canonicalizeLink(it.link)
 
-      allItems.push({
-        sourceName: host,
-        title: it.title || 'Vest',
+      selected.push({
+        sourceName: host || fallbackHost,
+        title: String(it.title || 'Vest').trim(),
         link: it.link,
         linkCanon,
         contentSnippet: it.contentSnippet,
@@ -199,21 +238,73 @@ async function gatherItems(limit: number) {
         enclosureUrl: fromEnclosure,
         coverUrl: firstValidCover([fromHtml, fromEnclosure]),
       })
+      perSourceCount.set(host, used + 1)
+      picked++
     }
   }
 
-  // Grupisanje po normalizovanom naslovu
-  const byTitle = new Map<string, FlatItem[]>()
-  for (const it of allItems) {
-    const key = normTitleKey(it.title)
-    if (!key) continue
-    const arr = byTitle.get(key) || []
-    arr.push(it)
-    byTitle.set(key, arr)
+  // drugi prolaz (round-robin) – ako ima slobodnog prostora do limita
+  if (picked < limit) {
+    const pools = feeds.map(f => {
+      const host = (() => { try { return new URL(f.url).host } catch { return 'unknown' } })()
+      const items = Array.isArray(f.items) ? [...(f.items as any[])] : []
+      shuffle(items)
+      return { host, items }
+    })
+
+    let changed = true
+    while (picked < limit && changed) {
+      changed = false
+      for (const p of pools) {
+        if (picked >= limit) break
+        while (p.items.length && picked < limit) {
+          const it = p.items.shift()
+          const title = String(it?.title || '').trim()
+          if (!title) continue
+
+          const contentHtml: string | undefined =
+            it['content:encoded'] || it.contentHtml || it.content || undefined
+
+          let fromEnclosure: string | null = null
+          if (it.enclosure?.url) {
+            const type = String(it.enclosure.type || '').toLowerCase()
+            const url = sanitizeAbsoluteUrl(it.enclosure.url, it.link)
+            if (url && (type.startsWith('image/') || isImagePathLike(url))) {
+              fromEnclosure = url
+            }
+          }
+          const fromHtml = extractImageUrl(contentHtml || it.contentSnippet, it.link)
+
+          selected.push({
+            sourceName: p.host,
+            title,
+            link: it.link,
+            linkCanon: canonicalizeLink(it.link),
+            contentSnippet: it.contentSnippet,
+            contentHtml,
+            isoDate: it.isoDate,
+            pubDate: it.pubDate,
+            enclosureUrl: fromEnclosure,
+            coverUrl: firstValidCover([fromHtml, fromEnclosure]),
+          })
+          picked++
+          changed = true
+          break
+        }
+      }
+    }
   }
 
-  // Prvih N grupa (najskorije)
-  const groups = Array.from(byTitle.values()).slice(0, limit)
+  // grupisanje po canonical linku (ili čistom linku)
+  const byKey = new Map<string, FlatItem[]>()
+  for (const it of selected.slice(0, limit)) {
+    const key = it.linkCanon || canonicalizeLink(it.link) || it.link
+    const arr = byKey.get(key) || []
+    arr.push(it)
+    byKey.set(key, arr)
+  }
+
+  const groups = Array.from(byKey.values())
   return groups
 }
 
@@ -274,7 +365,6 @@ async function runIngest(limit: number) {
       // 0) meka deduplikacija po izvornom naslovu (ako već postoji skoro identično)
       const recentDupe = await looksLikeRecentDuplicateByTitle(first.title || '')
       if (recentDupe) {
-        // eventualno dopuni cover/summary/content ako fale
         const updates: Record<string, any> = {}
         if (!recentDupe.coverImage) {
           const coverImage = await resolveCoverHard(first, group)
@@ -318,15 +408,11 @@ async function runIngest(limit: number) {
       const ai = await summarizeFromItem(first)
 
       // 2a) preskoči ako je sadržaj prekratak (< 500 karaktera)
-      if (!isLongEnough(ai.content)) {
-        // console.log('SKIP short content', first.title)
-        return
-      }
+      if (!isLongEnough(ai.content)) return
 
       // 2b) meka deduplikacija po AI naslovu (isti raspon od 3 dana)
       const aiRecentDupe = await looksLikeRecentDuplicateByTitle(ai.title)
       if (aiRecentDupe) {
-        // Ako postoji bliska vest po AI naslovu, samo probaj da dopuniš što fali
         const updates: Record<string, any> = {}
         if (!aiRecentDupe.coverImage) {
           const coverImage = await resolveCoverHard(first, group)
@@ -341,7 +427,7 @@ async function runIngest(limit: number) {
         return
       }
 
-      // 2c) (opciono) topicKey za internu proveru/analitiku — ne zahteva migraciju
+      // 2c) topicKey (informativno)
       const topicKey = makeTopicKey(ai.title, ai.content)
 
       // 3) Novi članak
@@ -361,13 +447,12 @@ async function runIngest(limit: number) {
           summary: ai.summary,
           content: ai.content,
           coverImage,
-          sourceUrl: linkCanon, // ← uvek kanonski link
-          // Ako NEMAŠ migraciju, topicKey čuvamo informativno u sourcesJson:
+          sourceUrl: linkCanon, // čuvamo kanonski link
           sourcesJson: JSON.stringify({
             items: group.map(g => ({ source: g.sourceName, link: g.link })),
             topicKey,
           }),
-          // Ako SI uradio migraciju (kolona Article.topicKey postoji), otkomentariši:
+          // ako imaš kolonu topicKey, možeš posebno upisati:
           topicKey,
           language: 'sr',
           publishedAt,
@@ -391,6 +476,11 @@ export async function GET(req: Request) {
   const authErr = requireTokenOrPass(req)
   if (authErr) return authErr
 
+  // pauza 01–05 Europe/Belgrade
+  if (isQuietHoursBelgrade()) {
+    return NextResponse.json({ ok: true, skipped: true, reason: 'quiet-hours' })
+  }
+
   const { limit, dryRun } = parseQuery(req)
 
   if (dryRun) {
@@ -411,6 +501,11 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const authErr = requireTokenOrPass(req)
   if (authErr) return authErr
+
+  // pauza 01–05 Europe/Belgrade
+  if (isQuietHoursBelgrade()) {
+    return NextResponse.json({ ok: true, skipped: true, reason: 'quiet-hours' })
+  }
 
   const { limit } = parseQuery(req)
   try {

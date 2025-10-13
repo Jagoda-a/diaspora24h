@@ -30,7 +30,7 @@ export default function ArticleCard({ article }: { article: Article }) {
   // Proxy kroz naš domen (rešava hotlink/CORS). Ako nema slike -> lokalni fallback.
   const cover = hasRemoteImage
     ? `/api/img?url=${encodeURIComponent(article.coverImage as string)}`
-    : '/cats/nepoznato.jpg' // uveri se da postoji u /public/cats
+    : '/cats/nepoznato.webp' // jedina izmena (ranije .jpg)
 
   const date = article.publishedAt
     ? new Date(article.publishedAt).toLocaleDateString('sr-RS', {

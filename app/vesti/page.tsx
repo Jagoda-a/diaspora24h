@@ -1,5 +1,6 @@
 // app/vesti/page.tsx
 import Link from "next/link"
+import Image from "next/image"
 import { prisma } from "@/lib/db"
 import { cache } from "react"
 
@@ -14,26 +15,35 @@ const CATS: { slug: string; title: string; img: string }[] = [
   { slug: "hronika",       title: "Hronika",       img: "hronika.webp" },
   { slug: "svet",          title: "Svet",          img: "svet.webp" },
   { slug: "kultura",       title: "Kultura",       img: "kultura.webp" },
-  { slug: "lifestyle",     title: "Lifestyle",     img: "lifestyle.webp" },
-  { slug: "zanimljivosti", title: "Zanimljivosti", img: "zanimljivosti.webp" },
   { slug: "zdravlje",      title: "Zdravlje",      img: "zdravlje.webp" },
-  { slug: "tehnologija",   title: "Tehnologija",   img: "tech.webp" },
+  { slug: "lifestyle",     title: "Lifestyle",     img: "lifestyle.webp" },
+  { slug: "tech",          title: "Tech",          img: "tech.webp" },
+  { slug: "zanimljivosti", title: "Zanimljivosti", img: "zanimljivosti.webp" },
+  { slug: "nepoznato",     title: "Nepoznato",     img: "nepoznato.webp" },
 ]
 
-// grupni upit: count + last
-const loadStats = cache(async () => {
+// grupna statistika po kategoriji (broj i poslednja izmena)
+const getStats = cache(async () => {
+  // koristimo updatedAt kao poslednje ažuriranje
   const rows = await prisma.article.groupBy({
     by: ["category"],
     _count: { _all: true },
-    _max: { publishedAt: true },
+    _max: { updatedAt: true },
   })
-  const map = new Map<string, { count: number; last?: Date | null }>()
-  for (const r of rows) map.set(r.category, { count: r._count._all, last: r._max.publishedAt })
-  return map
+
+  const m = new Map<string, { count: number; last: Date | null }>()
+  for (const r of rows) {
+    const key = (r.category || "").toLowerCase()
+    m.set(key, {
+      count: r._count._all,
+      last: r._max.updatedAt ?? null,
+    })
+  }
+  return m
 })
 
-export default async function VestiKategorijePage() {
-  const stats = await loadStats()
+export default async function VestiPoKategorijama() {
+  const stats = await getStats()
 
   return (
     <main
@@ -41,35 +51,35 @@ export default async function VestiKategorijePage() {
       style={{
         maxWidth: 1280,
         margin: "0 auto",
-        padding: "16px", // ← traženi 16px margin/padding oko sadržaja
+        // padding više NE stavljamo ovde; rešava ga .container u globals.css na 16px
       }}
     >
-      <h1 style={{ fontSize: 24, fontWeight: 600, margin: "0 0 16px 0" }}>Vesti po kategorijama</h1>
+      <h1 style={{ fontSize: 24, fontWeight: 600, margin: "0 0 16px 0" }}>
+        Vesti po kategorijama
+      </h1>
 
-      {/* Centrirani grid sa fiksnom širinom kartice 343px i razmacima 16px */}
+      {/* Centrirani fleks-grid sa fiksnom maksimalnom širinom kartice 343px i gap 16px */}
       <ul
         style={{
           display: "flex",
           flexWrap: "wrap",
           justifyContent: "center",
-          gap: 16,           // razmak horizontalno i vertikalno
-          margin: "16px 0",  // top/bottom
+          gap: 16,
+          margin: "16px 0",
           padding: 0,
           listStyle: "none",
         }}
       >
-        {CATS.map((cat) => {
+        {CATS.map((cat, i) => {
           const s = stats.get(cat.slug) || { count: 0, last: null }
           const href = `/vesti/k/${encodeURIComponent(cat.slug)}`
-          const webp = `/cats/${cat.img}`
-          const jpg = `/cats/${cat.img.replace(/\.webp$/i, ".jpg")}`
-          const fallback = `/cats/_fallback.webp`
+          const src = `/cats/${cat.img}`
 
           return (
             <li
               key={cat.slug}
               style={{
-                width: "min(343px, 100%)", // ≤343px na mobilnom
+                width: "min(343px, 100%)", // ≤343px na mobilnom, 100% širina kolone
               }}
             >
               <Link
@@ -78,27 +88,33 @@ export default async function VestiKategorijePage() {
                   textDecoration: "none",
                   color: "inherit",
                   display: "block",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 16,
-                  background: "#fff",
+                  background: "var(--card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 14,
                   overflow: "hidden",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-                  transition: "box-shadow .2s ease",
+                  boxShadow: "0 3px 10px var(--card-shadow)",
                 }}
               >
-                {/* COVER: fiksna visina 160px (pravougaonik) */}
-                <div style={{ width: "100%", height: 160, background: "#f3f4f6", overflow: "hidden" }}>
-                  <picture>
-                    <source srcSet={webp} type="image/webp" />
-                    <source srcSet={jpg} type="image/jpeg" />
-                    <img
-                      src={fallback}
-                      alt={cat.title}
-                      loading="lazy"
-                      decoding="async"
-                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                    />
-                  </picture>
+                {/* COVER 16:9 sa next/image optimizacijom */}
+                <div
+                  style={{
+                    position: "relative",
+                    width: "100%",
+                    aspectRatio: "16/9",
+                    overflow: "hidden",
+                    background: "var(--surface-weak)",
+                  }}
+                >
+                  <Image
+                    src={src}
+                    alt={cat.title}
+                    fill
+                    sizes="(max-width: 640px) 100vw, 343px"
+                    priority={i < 4}            // prve 4 kartice prioritetno
+                    placeholder="blur"
+                    blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
+                    style={{ objectFit: "cover", display: "block" }}
+                  />
                 </div>
 
                 {/* BODY */}
@@ -109,6 +125,7 @@ export default async function VestiKategorijePage() {
                       {s.count} {s.count === 1 ? "vest" : "vesti"}
                     </span>
                   </div>
+
                   {s.last && (
                     <p style={{ fontSize: 12, color: "#6b7280", margin: "6px 0 0 0" }}>
                       Poslednje ažuriranje: {new Date(s.last).toLocaleDateString("sr-RS")}
