@@ -1,38 +1,37 @@
-// components/CategoryTile.tsx
-import Link from 'next/link'
+import Link from "next/link";
 
 export default function CategoryTile({
   slug,
   label,
   count,
 }: {
-  slug: string
-  label: string
-  count: number
+  slug: string;
+  label: string;
+  count: number;
 }) {
-  const cover = `/cats/${slug}.webp` // statičan fallback iz /public/cats
+  const cover = `/cats/${slug}.webp`; // statička slika iz /public/cats
 
   return (
-    <article className="cat-card">
-      <Link href={`/vesti/k/${encodeURIComponent(slug)}`} aria-label={label}>
-        <div
-          className="cat-cover"
-          style={{ position: 'relative', width: '100%', aspectRatio: '16/9', overflow: 'hidden' }}
-        >
-          {/* Bez onError u server komponenti */}
-          <img
-            src={cover}
-            alt={label}
-            loading="lazy"
-            decoding="async"
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        </div>
-        <div className="cat-body">
-          <h3 className="cat-title">{label}</h3>
-          <p className="cat-count">{count} {count === 1 ? 'vest' : 'vesti'}</p>
-        </div>
-      </Link>
-    </article>
-  )
+    <Link
+      href={`/vesti/k/${encodeURIComponent(slug)}`}
+      className="block border border-neutral-200 rounded-md overflow-hidden hover:shadow-sm transition"
+      prefetch
+    >
+      <div className="w-full aspect-[16/9] bg-neutral-100">
+        <img
+          src={cover}
+          alt={label}
+          loading="lazy"
+          decoding="async"
+          className="w-full h-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+      </div>
+
+      <div className="p-3 flex items-center justify-between">
+        <span className="font-medium">{label}</span>
+        <span className="text-sm text-neutral-500">{count}</span>
+      </div>
+    </Link>
+  );
 }
