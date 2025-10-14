@@ -21,12 +21,20 @@ function normalize(s: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[’'"]/g, '')
+    .trim()
+}
+
+// Uklanjamo bučne prefikse tipa “Sažetak:”, “UŽIVO:”, “VIDEO:”, “FOTO:”
+function stripNoisyPrefixes(s: string): string {
+  const t = s.replace(/^\s*(sažetak|sazetak|uživo|uzivo|video|foto)\s*[:\-–]\s*/i, '')
+  // nekad ima duplo, pa ponovimo jednom
+  return t.replace(/^\s*(sažetak|sazetak|uživo|uzivo|video|foto)\s*[:\-–]\s*/i, '')
 }
 
 function hasPhrase(text: string, phrase: string): boolean {
   const t = normalize(text)
   const p = normalize(phrase)
-  const rx = new RegExp(`(^|\\b)${p.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}(\\b|$)`)
+  const rx = new RegExp(`(^|\\b)${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`)
   return rx.test(t)
 }
 
@@ -87,31 +95,34 @@ export const CATS: Record<Cat, CatDef> = {
   sport: {
     label: 'Sport',
     keywords: [
-      'sport','utakmica','rezultat','tabella','tabela','liga','kolo','derbi','turnir','kup','pobjeda','pobeda','poraz',
+      'sport','utakmica','rezultat','tabela','liga','kolo','derbi','turnir','kup','pobjeda','pobeda','poraz',
       'reprezentacija','selektor','trener','igrac','igrač','gol','asistencija','penal','sudija',
-      'stadion','navijaci','navijači','transfer','ugovor','rekord','rang lista'
+      'stadion','navijaci','navijači','transfer','ugovor','rekord','rang lista',
+      'fudbal','fudbaler','košarka','kosarka','tenis','rukomet','odbojka','derbi',
+      'zvezda','partizan','tadić','tadic','piksi','stojković','stojkovic','uefa','fifa'
     ],
     phrases: [
-      'sans(e|a|i) za mundijal','kvalifikacije za mundijal','lig(a|e) sampiona','liga šampiona',
-      'evropsko prvenstvo','svetsko prvenstvo','finalna serija'
+      'kvalifikacije za mundijal','liga sampiona','liga šampiona',
+      'evropsko prvenstvo','svetsko prvenstvo','finalna serija',
+      'sportski uspesi','sportske uspehe'
     ],
     priority: [
       'mundijal','kvalifikacije','utakmica','gol','pobeda','poraz',
       'zvezda','partizan','uefa','fifa','evroliga','premijer liga','serie a','bundesliga','laliga','super liga',
-      'albanija','srbija'
+      'srbija','selektor'
     ],
     negatives: [
       'izbori','vlada','ministar','skupstina','kurti','kosovo',
       'ai','android','iphone','aplikacija','holivud','glumac','glumica','film'
     ],
-    minScore: 3,
+    minScore: 2, // spušten prag – lakše pada u sport
   },
 
   hronika: {
     label: 'Hronika',
     keywords: [
       'uhapsen','uhapšen','hapsenje','hapšenje','istraga','potera','potjera',
-      'nesreca','nesreća','saobracajka','saobraćajka','ud(es|ar)','krv','razbojnik','pljacka','pljačka','krađa','kradja',
+      'nesreca','nesreća','saobracajka','saobraćajka','udes','udar','krv','razbojnik','pljacka','pljačka','krađa','kradja',
       'ubistvo','silovanje','pretnja','nasilje','napad','ranjen','povredjen','povređen',
       'tuzilastvo','tužilaštvo','sud','presuda','pritvor','preminuo','preminula','poginuo','tragedija'
     ],
@@ -133,11 +144,11 @@ export const CATS: Record<Cat, CatDef> = {
     label: 'Ekonomija',
     keywords: [
       'ekonomija','privreda','berza','trziste','tržište','akcije','obveznice','kamata','kamatna stopa','kurs',
-      'inflacija','deflacija','bnp','bpd','bnp-a','bpd-a','rast','pad','recesija','budzet','budžet','deficit',
-      'investicija','investicije','izvoz','uvoz','bilans','plate','minimalac','penzije','porez','pdv','gdp'
+      'inflacija','deflacija','rast','pad','recesija','budzet','budžet','deficit',
+      'investicija','investicije','izvoz','uvoz','bilans','plate','minimalac','penzije','porez','pdv','gdp','bnp','bpd'
     ],
     phrases: [
-      'ekonomski rast','ekonomska kriza','monetarna politika','fiskalna politika','javne finansije'
+      'ekonomski rast','ekonomska kriza','monetarna politika','fiskalna politika','javne finansije','budžetska rezerva'
     ],
     priority: [
       'inflacija','kamatna stopa','kamatne stope','berza','kurs','budzet','budžet','gdp','bnp','bpd'
@@ -154,9 +165,9 @@ export const CATS: Record<Cat, CatDef> = {
   tehnologija: {
     label: 'Tehnologija',
     keywords: [
-      'tehnologija','tehnolo','tech','it','ai','vestacka inteligencija','ml','nlp','gpu','cpu','ram','ssd','chip','cip','nvidia',
-      'aplikacija','app','android','ios','iphone','ipad','mac','windows','linux','kernel',
-      'update','apdejt','beta','release','open source','git','github','cloud','server','database','sql','postgres','mysql',
+      'tehnologija','tech','it','ai','vestacka inteligencija','ml','nlp','gpu','cpu','ram','ssd','chip','cip','nvidia',
+      'aplikacija','android','ios','iphone','ipad','mac','windows','linux','kernel',
+      'update','beta','release','open source','git','github','cloud','server','database','sql','postgres','mysql',
       'vr','ar','xr','robot','dron','iot','smart','gadget','telefon','kamera','senzor','algoritam','model'
     ],
     phrases: [
@@ -178,15 +189,17 @@ export const CATS: Record<Cat, CatDef> = {
   kultura: {
     label: 'Kultura',
     keywords: [
-      'kultura','film','serija','glumac','glumica','režija','rezija','kinematografija','premijera','festival',
-      'teatar','pozoriste','pozorište','opera','balet','knjiga','književnost','knjizevnost','pesnik','roman','kritika',
-      'holivud','hollywood','oscars','kan','cannes','berlinale','venecija','repertoar','kinosala','bioskop','umetnost','galerija'
+      'kultura','film','serija','glumac','glumica','rezija','režija','kinematografija','premijera','festival',
+      'teatar','pozoriste','pozorište','pozorišt','opera','balet','knjiga','književnost','knjizevnost','pesnik','roman','kritika',
+      'holivud','hollywood','oscars','kan','cannes','berlinale','venecija','repertoar','kinosala','bioskop','umetnost','galerija',
+      'premijere','repertoaru','repertoar'
     ],
     phrases: [
+      'premijere u beogradskim pozorištima','nova predstava','na repertoaru','premijera predstave',
       'legendarna glumica','legendarni glumac','ikona stila','filmska ikona','nagrađen za ulogu','nagrađena za ulogu'
     ],
     priority: [
-      'glumica','glumac','film','serija','holivud','oscars','premijera','festival','režiser','reziser'
+      'pozorište','pozoriste','teatar','premijera','repertoar','glumica','glumac','film','serija','holivud','oscars','festival','režiser','reziser'
     ],
     negatives: [
       'utakmica','gol','mundijal',
@@ -202,17 +215,11 @@ export const CATS: Record<Cat, CatDef> = {
       'zdravlje','klinika','bolnica','ambulanta','doktori','lekar','doktor','zdravstveni','pacijent','terapija',
       'vakcina','epidemija','pandemija','virus','bakterija','simptomi','lecenje','lečenje','prevencija','ishrana'
     ],
-    phrases: [
-      'javna zdravlja','kampanja vakcinacije','mer(e|a) prevencije'
-    ],
-    priority: [
-      'vakcina','epidemija','pandemija','terapija','klinika','bolnica'
-    ],
+    phrases: ['javna zdravlja','kampanja vakcinacije','mere prevencije','mera prevencije'],
+    priority: ['vakcina','epidemija','pandemija','terapija','klinika','bolnica'],
     negatives: [
-      'izbori','vlada','ministar',
-      'utakmica','gol',
-      'glumica','glumac','film','serija',
-      'android','iphone','aplikacija','ai'
+      'izbori','vlada','ministar','mundijal','utakmica','gol',
+      'glumica','glumac','film','serija','android','iphone','aplikacija','ai'
     ],
     minScore: 3,
   },
@@ -223,35 +230,22 @@ export const CATS: Record<Cat, CatDef> = {
       'lifestyle','moda','stil','trend','saveti','zivotni stil','putovanja','putovanje','ishrana','fitnes','trening',
       'enterijer','dekor','uređenje doma','beauty','wellness','savjet','influencer'
     ],
-    phrases: [
-      'ikona stila','modni trendovi','uređenje enterijera','saveti za putovanje'
-    ],
-    priority: [
-      'moda','stil','beauty','wellness'
-    ],
+    phrases: ['ikona stila','modni trendovi','uređenje enterijera','saveti za putovanje'],
+    priority: ['moda','stil','beauty','wellness'],
     negatives: [
-      'izbori','vlada','ministar','kurti','kosovo',
-      'mundijal','utakmica','gol',
-      'glumica','glumac','film','serija',
-      'android','iphone','aplikacija','ai'
+      'izbori','vlada','ministar','kurti','kosovo','mundijal','utakmica','gol',
+      'glumica','glumac','film','serija','android','iphone','aplikacija','ai'
     ],
     minScore: 3,
   },
 
   zanimljivosti: {
     label: 'Zanimljivosti',
-    keywords: [
-      'zanimljivosti','neobicno','neobično','bizarno','rekord','viralno','kuriozitet','neobican','neobičan','neverovatno'
-    ],
-    phrases: [
-      'verovali ili ne','dosad nezabelezeno','neobična pojava'
-    ],
+    keywords: ['zanimljivosti','neobicno','neobično','bizarno','rekord','viralno','kuriozitet','neobican','neobičan','neverovatno'],
+    phrases: ['verovali ili ne','dosad nezabelezeno','neobična pojava'],
     priority: ['rekord','viralno','kuriozitet'],
     negatives: [
-      'izbori','vlada','ministar',
-      'utakmica','gol','mundijal',
-      'glumica','glumac','film','serija',
-      'android','iphone','aplikacija','ai'
+      'izbori','vlada','ministar','utakmica','gol','mundijal','glumica','glumac','film','serija','android','iphone','aplikacija','ai'
     ],
     minScore: 3,
   },
@@ -260,35 +254,24 @@ export const CATS: Record<Cat, CatDef> = {
     label: 'Svet',
     keywords: [
       'svet','globalno','medjunarodno','međunarodno','diplomatija','geopolitika','un','nato','eu','sad','usa',
-      'kina','rusija','ukrajina','bliski istok','bliski istoku','bliski istoka','gaza','izra( e)?l','palestina'
+      'kina','rusija','ukrajina','bliski istok','gaza','izrael','palestina'
     ],
-    phrases: [
-      'medjunarodna zajednica','spoljna politika','globalna kriza'
-    ],
+    phrases: ['medjunarodna zajednica','spoljna politika','globalna kriza'],
     priority: ['un','nato','eu','sad','kina','rusija','ukrajina','gaza','izrael','palestina'],
-    negatives: [
-      'android','iphone','aplikacija','ai',
-      'glumica','glumac','film','serija',
-      'mundijal','utakmica','gol'
-    ],
+    negatives: ['android','iphone','aplikacija','ai','glumica','glumac','film','serija','mundijal','utakmica','gol'],
     minScore: 3,
   },
 
   region: {
     label: 'Region',
     keywords: [
-      'region','balkan','srbija','hrvatska','bosna','bih','crna gora','cg','slovenija','makedonija','severna makedonija','albanija','kosovo','pristina','priština','banja luka','banjaluka',
+      'region','balkan','srbija','hrvatska','bosna','bih','crna gora','cg','slovenija','makedonija','severna makedonija',
+      'albanija','kosovo','pristina','priština','banja luka','banjaluka',
       'novi sad','nis','niš','kragujevac','subotica','novi pazar'
     ],
-    phrases: [
-      'u regionu','zapadni balkan','srbi na kosovu'
-    ],
+    phrases: ['u regionu','zapadni balkan','srbi na kosovu'],
     priority: ['balkan','srbija','kosovo','hrvatska','bih','cg','slovenija','makedonija','albanija'],
-    negatives: [
-      'android','iphone','aplikacija','ai',
-      'glumica','glumac','film','serija',
-      'mundijal','utakmica','gol'
-    ],
+    negatives: ['android','iphone','aplikacija','ai','glumica','glumac','film','serija','mundijal','utakmica','gol'],
     minScore: 3,
   },
 
@@ -298,16 +281,9 @@ export const CATS: Record<Cat, CatDef> = {
       'drustvo','društvo','obrazovanje','skola','škola','ucenik','učenik','fakultet','univerzitet','socijalno',
       'zdravstvo','penzija','penzije','demografija','porodica','lokalno','komunalno','saobracaj','saobraćaj'
     ],
-    phrases: [
-      'javna rasprava','lokalna zajednica','obrazovna reforma','reforma obrazovanja','socijalna politika'
-    ],
+    phrases: ['javna rasprava','lokalna zajednica','obrazovna reforma','reforma obrazovanja','socijalna politika'],
     priority: ['obrazovanje','zdravstvo','porodica','socijalno'],
-    negatives: [
-      'izbori','vlada','ministar',
-      'mundijal','utakmica','gol',
-      'glumica','glumac','film','serija',
-      'android','iphone','aplikacija','ai'
-    ],
+    negatives: ['izbori','vlada','ministar','mundijal','utakmica','gol','glumica','glumac','film','serija','android','iphone','aplikacija','ai'],
     minScore: 2,
   },
 }
@@ -324,11 +300,24 @@ export function isValidCat(x: string | null | undefined): x is Cat {
 }
 
 // ------------------------
+// “Hard switch” rute za veoma prepoznatljive slučajeve
+// ------------------------
+const SPORT_STRONG = /(selektor|fudbal|fudbaler|utakmic|liga|kolo|derbi|gol|piksi|stojkovic|stojković|tadic|tadić|zvezda|partizan|uefa|fifa)\b/
+const KULTURA_STRONG = /(pozorišt|pozorist|teatar|premijer[ae]?|repertoar|predstava)\b/
+
+// ------------------------
 // Klasifikator
 // ------------------------
 export function classifyTitle(title: string, hint?: string | null): Cat {
-  const textRaw = `${title || ''} ${hint || ''}`
+  // skidamo bučne prefikse tipa “Sažetak:”
+  const cleanedTitle = stripNoisyPrefixes(title || '')
+  const cleanedHint = stripNoisyPrefixes(hint || '')
+  const textRaw = `${cleanedTitle} ${cleanedHint}`.trim()
   const t = normalize(textRaw)
+
+  // Hard switch: očigledan sport/kultura
+  if (SPORT_STRONG.test(t)) return 'sport'
+  if (KULTURA_STRONG.test(t)) return 'kultura'
 
   let best: { cat: Cat; score: number } | null = null
   const scores: Record<Cat, number> = {
@@ -351,7 +340,7 @@ export function classifyTitle(title: string, hint?: string | null): Cat {
 
     // Obične ključne reči (granice reči)
     for (const kw of cfg.keywords) {
-      const rx = new RegExp(`(^|\\b)${normalize(kw).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}(\\b|$)`)
+      const rx = new RegExp(`(^|\\b)${normalize(kw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`)
       if (rx.test(t)) score += W.token
     }
 
@@ -377,7 +366,7 @@ export function classifyTitle(title: string, hint?: string | null): Cat {
 
   // Egal: zadrži samo one sa max score, pa primeni TIE_BREAK
   if (best) {
-    const max = Math.max(...(Object.values(scores)))
+    const max = Math.max(...Object.values(scores))
     const tied = (Object.keys(scores) as Cat[]).filter(c => scores[c] === max)
     if (tied.length > 1) {
       for (const c of TIE_BREAK) if (tied.includes(c)) return c
