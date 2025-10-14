@@ -566,6 +566,18 @@ a:hover { text-decoration: underline; }
 .prose li { margin: 0.25em 0; }
 .prose img { display: block; max-width: 100%; height: auto; margin: 1em auto; }
 
+
+/* Objavljeno u dva reda */
+.col-published { white-space: normal; }
+.col-published .pub-date,
+.col-published .pub-time {
+  display: block;
+  line-height: 1.2;
+}
+
+
+
+
 /* =======================
    GILROY – FONT FACE
    ======================= */
@@ -579,3 +591,6 @@ a:hover { text-decoration: underline; }
 @font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-ExtraBold.ttf') format('truetype'); font-weight: 800; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Heavy.ttf') format('truetype'); font-weight: 900; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Black.ttf') format('truetype'); font-weight: 950; font-style: normal; font-display: swap; }
+
+
+

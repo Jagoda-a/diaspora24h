@@ -64,52 +64,6 @@ export default function AdminList() {
     fetchPage(true)
   }
 
-  async function togglePublish(row: Row) {
-    try {
-      setMessage(null)
-      const newPublishedAt =
-        row.computedStatus === 'published' ? null : new Date().toISOString()
-
-      const res = await fetch(`/api/admin/article/${encodeURIComponent(row.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ publishedAt: newPublishedAt })
-      })
-      const data = await res.json()
-      if (!res.ok || !data?.ok) throw new Error(data?.error || 'update_failed')
-
-      setRows(prev => prev.map(r => r.id === row.id ? {
-        ...r,
-        publishedAt: newPublishedAt,
-        computedStatus: newPublishedAt ? 'published' : 'draft',
-      } : r))
-
-      await fetch('/api/admin/revalidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug: row.slug, tags: ['articles', `article:${row.slug}`] })
-      }).catch(() => {})
-
-      setMessage('Status ažuriran.')
-    } catch (e: any) {
-      setErr(e?.message || 'Greška pri ažuriranju')
-    }
-  }
-
-  async function revalidateRow(row: Row) {
-    try {
-      setMessage(null)
-      await fetch('/api/admin/revalidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug: row.slug, tags: ['articles', `article:${row.slug}`] })
-      })
-      setMessage('Revalidacija poslata.')
-    } catch {
-      setErr('Greška pri revalidaciji')
-    }
-  }
-
   async function deleteRow(row: Row) {
     if (!confirm(`Obrisati vest: "${row.title}"?`)) return
     try {
@@ -117,10 +71,8 @@ export default function AdminList() {
       const res = await fetch(`/api/admin/article/${encodeURIComponent(row.id)}`, { method: 'DELETE' })
       const data = await res.json()
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'delete_failed')
-
       setRows(prev => prev.filter(r => r.id !== row.id))
 
-      // pokušaj revalidacije stranice vesti i listinga
       await fetch('/api/admin/revalidate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -141,109 +93,235 @@ export default function AdminList() {
 
   return (
     <section>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Poslednje vesti</h2>
-        <a href="/admin/new" style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #d1d5db', textDecoration: 'none' }}>
-          + Nova vest
-        </a>
-      </div>
+      <style jsx>{`
+        .wrap {
+          max-width: 100%;
+          width: 100%;
+          margin: 0 auto;
+          padding: 0 12px;
+        }
 
-      <form onSubmit={applyFilters} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Pretraga…" />
-        <select value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="">Status</option>
-          <option value="published">Objavljeno</option>
-          <option value="draft">Draft</option>
-        </select>
-        <input value={country} onChange={e => setCountry(e.target.value)} placeholder="Zemlja (npr. RS)" style={{ width: 120 }} />
-        <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Kategorija" style={{ width: 180 }} />
-        <button type="submit" disabled={loading}>Primeni</button>
-      </form>
+        /* FILTERS */
+        .filters {
+          display: grid;
+          grid-template-columns: 1fr 140px 140px 180px auto;
+          gap: 8px;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+        .filters input, .filters select {
+          background: transparent; color: inherit;
+          border: 1px solid currentColor; opacity: .9;
+          border-radius: 8px; padding: 10px 12px;
+          min-height: 40px;
+        }
+        .filters .actions-bar { display: flex; justify-content: center; }
+        .btn {
+          height: 40px;
+          padding: 0 14px;
+          border: 1px solid currentColor;
+          border-radius: 8px;
+          background: transparent;
+          color: inherit;
+          cursor: pointer;
+          white-space: nowrap;
+        }
 
-      {err && <p style={{ color: '#b00' }}>{err}</p>}
-      {message && <p style={{ color: '#070' }}>{message}</p>}
+        /* TABLE */
+        .table-wrap { width: 100%; overflow-x: hidden; }
+        .table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .table th, .table td { padding: 8px; vertical-align: middle; }
+        .table th { border-bottom: 1px solid rgba(127,127,127,0.25); text-align: center; }
+        .table td { border-bottom: 1px solid rgba(127,127,127,0.25); }
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left' }}>
-              <th style={{ borderBottom: '1px solid #eee', padding: 8 }}>Slika</th>
-              <th style={{ borderBottom: '1px solid #eee', padding: 8 }}>Naslov</th>
-              <th style={{ borderBottom: '1px solid #eee', padding: 8 }}>Status</th>
-              <th style={{ borderBottom: '1px solid #eee', padding: 8 }}>Zemlja</th>
-              <th style={{ borderBottom: '1px solid #eee', padding: 8 }}>Kategorija</th>
-              <th style={{ borderBottom: '1px solid #eee', padding: 8 }}>Objavljeno</th>
-              <th style={{ borderBottom: '1px solid #eee', padding: 8 }}>Akcije</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(r => (
-              <tr key={r.id}>
-                <td style={{ borderBottom: '1px solid #f2f2f2', padding: 8 }}>
-                  {r.coverImage ? (
-                    <img
-                      src={`/api/img?url=${encodeURIComponent(r.coverImage)}`}
-                      alt=""
-                      style={{ width: 80, height: 60, objectFit: 'cover', borderRadius: 6, border: '1px solid #eee' }}
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0.3' }}
-                    />
-                  ) : <span style={{ color: '#999' }}>—</span>}
-                </td>
-                <td style={{ borderBottom: '1px solid #f2f2f2', padding: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{r.title}</div>
-                  <div style={{ fontSize: 12, color: '#666' }}>{r.slug}</div>
-                </td>
-                <td style={{ borderBottom: '1px solid #f2f2f2', padding: 8 }}>
-                  <span style={{
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    fontSize: 12,
-                    background: r.computedStatus === 'published' ? '#E8F5E9' : '#FFF3E0',
-                    color: r.computedStatus === 'published' ? '#2E7D32' : '#EF6C00',
-                    border: '1px solid #eee'
-                  }}>
-                    {r.computedStatus}
-                  </span>
-                </td>
-                <td style={{ borderBottom: '1px solid #f2f2f2', padding: 8 }}>{r.country || '—'}</td>
-                <td style={{ borderBottom: '1px solid #f2f2f2', padding: 8 }}>{r.category || '—'}</td>
-                <td style={{ borderBottom: '1px solid #f2f2f2', padding: 8 }}>
-                  {r.publishedAt ? new Date(r.publishedAt).toLocaleString() : '—'}
-                </td>
-                <td style={{ borderBottom: '1px solid #f2f2f2', padding: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button onClick={() => togglePublish(r)} style={{ padding: '6px 10px' }}>
-                    {r.computedStatus === 'published' ? 'Unpublish' : 'Publish'}
-                  </button>
-                  <a href={`/vesti/${r.slug}`} target="_blank" rel="noreferrer" style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 8 }}>
-                    Otvori
-                  </a>
-                  <a href={`/admin/article/${r.id}`} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 8 }}>
-                    Izmeni
-                  </a>
-                  <button onClick={() => revalidateRow(r)} style={{ padding: '6px 10px' }}>
-                    Revalidate
-                  </button>
-                  <button onClick={() => deleteRow(r)} style={{ padding: '6px 10px', color: '#b00', border: '1px solid #f1c5c5', borderRadius: 8, background: '#fff5f5' }}>
-                    Obriši
-                  </button>
-                </td>
+        /* Desktop: kolone po procentima (suma 100%) – bez h-scrolla */
+        @media (min-width: 900px) {
+          .col-img       { width: 10%; text-align: center; }
+          .col-title     { width: 28%; text-align: left; }
+          .col-status    { width: 9%;  text-align: center; }
+          .col-country   { width: 7%;  text-align: center; }
+          .col-category  { width: 12%; text-align: center; }
+          .col-published { width: 14%; text-align: center; }
+          .col-actions   { width: 20%; text-align: center; }
+        }
+
+        /* Naslov – 2 reda, bold */
+        .title {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: normal;
+          line-height: 1.25;
+          max-height: calc(1.25em * 2);
+          font-weight: 600;
+        }
+        .slug { display: none; }
+
+        /* Akcije – vertikalno i centrirane */
+        .col-actions { vertical-align: middle; }
+        .actions {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: 100%;
+        }
+        .action-btn {
+          width: 120px;
+          height: 36px;
+          border: 1px solid currentColor;
+          border-radius: 8px;
+          background: transparent;
+          color: inherit;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 10px;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+        .action-btn--danger { color: #b91c1c; }
+
+        /* ===== MOBILNI: samo ovde menjamo (desktop ostaje netaknut) ===== */
+        @media (max-width: 640px) {
+          .wrap { padding: 0 8px; }
+
+          .filters {
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+          }
+
+          .table-wrap { overflow-x: auto; }
+          .table {
+            min-width: 560px;            /* uži nego pre (bio 720px) */
+            table-layout: fixed;
+          }
+
+          /* sakrij: Status(3), Zemlja(4), Objavljeno(6) */
+          .table th:nth-child(3), .table td:nth-child(3),
+          .table th:nth-child(4), .table td:nth-child(4),
+          .table th:nth-child(6), .table td:nth-child(6) { display: none; }
+
+          /* 👇 Mobilne širine kolona koje ostaju: Slika (1), Naslov (2), Kategorija (5), Akcije (7) */
+          .col-img       { width: 64px; text-align: center; }   /* tačno koliko thumbnail + padding */
+          .col-img img   { width: 56px !important; height: 42px !important; object-fit: cover; }
+          .col-title     { width: auto; }                       /* uzima ostatak */
+          .col-category  { width: 110px; text-align: center; }  /* uža kategorija i centrirana */
+          .col-actions   { width: 130px; text-align: center; }  /* akcije ostaju kako jesu */
+
+          /* Akcione tipke pune širinu kolone na mobilnom */
+          .action-btn { width: 100%; height: 34px; }
+          .table th, .table td { padding: 6px; }                /* malo kompaktnije redove */
+        }
+      `}</style>
+
+      <div className="wrap">
+        <form onSubmit={applyFilters} className="filters">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Pretraga…" />
+          <select value={status} onChange={e => setStatus(e.target.value)}>
+            <option value="">Status</option>
+            <option value="published">Objavljeno</option>
+            <option value="draft">Draft</option>
+          </select>
+          <input value={country} onChange={e => setCountry(e.target.value)} placeholder="Zemlja (npr. RS)" />
+          <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Kategorija" />
+          <div className="actions-bar">
+            <button type="submit" disabled={loading} className="btn">
+              {loading ? 'Učitavam…' : 'Primeni'}
+            </button>
+          </div>
+        </form>
+
+        {err && <p style={{ color: '#b00' }}>{err}</p>}
+        {message && <p style={{ color: '#070' }}>{message}</p>}
+
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="col-img">Slika</th>
+                <th className="col-title">Naslov</th>
+                <th className="col-status">Status</th>
+                <th className="col-country">Zemlja</th>
+                <th className="col-category">Kategorija</th>
+                <th className="col-published">Objavljeno</th>
+                <th className="col-actions">Akcije</th>
               </tr>
-            ))}
-            {rows.length === 0 && !loading && (
-              <tr><td colSpan={7} style={{ padding: 20, color: '#777' }}>Nema rezultata.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td className="col-img">
+                    {r.coverImage ? (
+                      <img
+                        src={`/api/img?url=${encodeURIComponent(r.coverImage)}`}
+                        alt=""
+                        style={{ width: 80, height: 60, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(127,127,127,0.25)' }}
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = '0.3' }}
+                      />
+                    ) : <span style={{ opacity: 0.6 }}>—</span>}
+                  </td>
 
-      <div style={{ marginTop: 12 }}>
-        {nextCursor ? (
-          <button onClick={loadMore} disabled={loading} style={{ padding: '8px 14px' }}>
-            {loading ? 'Učitavam…' : 'Učitaj još'}
-          </button>
-        ) : (
-          <span style={{ color: '#777', fontSize: 12 }}>Nema više stavki.</span>
-        )}
+                  <td className="col-title">
+                    <span className="title">{r.title}</span>
+                  </td>
+
+                  <td className="col-status">
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 12,
+                      border: '1px solid rgba(127,127,127,0.35)',
+                      opacity: .9,
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {r.computedStatus}
+                    </span>
+                  </td>
+
+                  <td className="col-country">{r.country || '—'}</td>
+                  <td className="col-category" style={{ whiteSpace: 'nowrap' }}>{r.category || '—'}</td>
+                  <td className="col-published" style={{ whiteSpace: 'normal' }}>
+                    {r.publishedAt ? (
+                      <>
+                        <span className="pub-date">{new Date(r.publishedAt).toLocaleDateString()}</span>
+                        <span className="pub-time">
+                          {new Date(r.publishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </>
+                    ) : '—'}
+                  </td>
+
+                  <td className="col-actions">
+                    <div className="actions">
+                      <a href={`/vesti/${r.slug}`} target="_blank" rel="noreferrer" className="action-btn">Otvori</a>
+                      <a href={`/admin/article/${r.id}`} className="action-btn">Izmeni</a>
+                      <button onClick={() => deleteRow(r)} className="action-btn action-btn--danger">Obriši</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && !loading && (
+                <tr><td colSpan={7} style={{ padding: 20, opacity: 0.7 }}>Nema rezultata.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center' }}>
+          {nextCursor ? (
+            <button onClick={loadMore} disabled={loading} className="btn">
+              {loading ? 'Učitavam…' : 'Učitaj još'}
+            </button>
+          ) : (
+            <span style={{ opacity: 0.7, fontSize: 12 }}>Nema više stavki.</span>
+          )}
+        </div>
       </div>
     </section>
   )

@@ -148,6 +148,39 @@ function isQuietHoursBelgrade(): boolean {
 }
 
 /* -------------------------
+   SEO helpers
+------------------------- */
+
+function trimTo(s: string, n: number) {
+  const x = s.trim().replace(/\s+/g, ' ')
+  return x.length <= n ? x : x.slice(0, n - 1).trimEnd() + '…'
+}
+
+function siteOrigin() {
+  // PUBLIC_SITE_ORIGIN npr. https://diaspora24h.com
+  return (process.env.PUBLIC_SITE_ORIGIN || 'https://diaspora24h.vercel.app').replace(/\/$/, '')
+}
+
+function buildSeoTitle(title: string, siteName = 'Diaspora24h') {
+  // primer: "Naslov vesti — Diaspora24h"
+  const base = title?.trim() || 'Vest'
+  return trimTo(`${base} — ${siteName}`, 60)
+}
+
+function buildSeoDescription(summary?: string, fallbackFromContent?: string) {
+  const txt = (summary || fallbackFromContent || '').trim()
+  return trimTo(txt, 160) // ~160 znakova
+}
+
+function buildCanonical(slug: string) {
+  return `${siteOrigin()}/vesti/${slug}`
+}
+
+function pickOgImage(coverImage?: string | null, contentImage?: string | null) {
+  return coverImage || contentImage || null
+}
+
+/* -------------------------
    Auth + query params
 ------------------------- */
 
@@ -376,6 +409,12 @@ async function runIngest(limit: number) {
           const ai = await summarizeFromItem(first)
           if (!recentDupe.summary && ai.summary) updates.summary = ai.summary
           if (!recentDupe.content && isLongEnough(ai.content)) updates.content = ai.content
+          // dopuni SEO ako fali
+          if (!recentDupe.seoTitle && ai.title) updates.seoTitle = buildSeoTitle(ai.title)
+          if (!recentDupe.seoDescription) updates.seoDescription = buildSeoDescription(ai.summary, ai.content)
+          if (!recentDupe.ogImage) updates.ogImage = pickOgImage(updates.coverImage || recentDupe.coverImage, null)
+          if (!recentDupe.canonicalUrl) updates.canonicalUrl = buildCanonical(recentDupe.slug)
+          if (typeof recentDupe.noindex !== 'boolean') updates.noindex = false
         }
         if (Object.keys(updates).length > 0) {
           await prisma.article.update({ where: { id: recentDupe.id }, data: updates })
@@ -400,6 +439,12 @@ async function runIngest(limit: number) {
           const ai = await summarizeFromItem(first)
           if (!byLink.summary && ai.summary) updates.summary = ai.summary
           if (!byLink.content && isLongEnough(ai.content)) updates.content = ai.content
+          // dopuni SEO ako fali
+          if (!byLink.seoTitle && ai.title) updates.seoTitle = buildSeoTitle(ai.title)
+          if (!byLink.seoDescription) updates.seoDescription = buildSeoDescription(ai.summary, ai.content)
+          if (!byLink.ogImage) updates.ogImage = pickOgImage(updates.coverImage || byLink.coverImage, null)
+          if (!byLink.canonicalUrl) updates.canonicalUrl = buildCanonical(byLink.slug)
+          if (typeof byLink.noindex !== 'boolean') updates.noindex = false
         }
         if (Object.keys(updates).length > 0) {
           await prisma.article.update({ where: { id: byLink.id }, data: updates })
@@ -426,6 +471,13 @@ async function runIngest(limit: number) {
         }
         if (!aiRecentDupe.summary && ai.summary) updates.summary = ai.summary
         if (!aiRecentDupe.content && isLongEnough(ai.content)) updates.content = ai.content
+        // dopuni SEO ako fali
+        if (!aiRecentDupe.seoTitle && ai.title) updates.seoTitle = buildSeoTitle(ai.title)
+        if (!aiRecentDupe.seoDescription) updates.seoDescription = buildSeoDescription(ai.summary, ai.content)
+        if (!aiRecentDupe.ogImage) updates.ogImage = pickOgImage(updates.coverImage || aiRecentDupe.coverImage, null)
+        if (!aiRecentDupe.canonicalUrl) updates.canonicalUrl = buildCanonical(aiRecentDupe.slug)
+        if (typeof aiRecentDupe.noindex !== 'boolean') updates.noindex = false
+
         if (Object.keys(updates).length > 0) {
           await prisma.article.update({ where: { id: aiRecentDupe.id }, data: updates })
           updated++
@@ -450,6 +502,12 @@ async function runIngest(limit: number) {
 
       const uniqueSlug = await findUniqueSlug(ai.title)
 
+      // SEO vrednosti prilikom kreiranja
+      const seoTitle = buildSeoTitle(ai.title)
+      const seoDescription = buildSeoDescription(ai.summary, ai.content)
+      const ogImage = pickOgImage(coverImage, null)
+      const canonicalUrl = buildCanonical(uniqueSlug)
+
       await prisma.article.create({
         data: {
           country: 'rs',
@@ -463,11 +521,17 @@ async function runIngest(limit: number) {
             items: group.map(g => ({ source: g.sourceName, link: g.link })),
             topicKey,
           }),
-          // ako imaš kolonu topicKey, možeš posebno upisati:
           topicKey,
           language: 'sr',
           publishedAt,
           category,
+
+          // SEO polja
+          seoTitle,
+          seoDescription,
+          ogImage,
+          canonicalUrl,
+          noindex: false,
         },
       })
       created++

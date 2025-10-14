@@ -1,8 +1,9 @@
 // app/admin/article/[id]/page.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { CAT_KEYS, CAT_LABELS } from '@/lib/cats'
 
 type Article = {
   id: string
@@ -32,13 +33,16 @@ export default function AdminEditArticlePage() {
   const [removing, setRemoving] = useState(false)
   const [toast, setToast] = useState<{ kind: 'ok'|'err', text: string } | null>(null)
 
+  // pamtimo prethodnu kategoriju da bismo revalidirali i staru i novu listu
+  const prevCatRef = useRef<string | null>(null)
+
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch(`/api/admin/article/${encodeURIComponent(id)}`, { cache: 'no-store' })
         const data = await res.json()
         if (!res.ok) throw new Error(data?.error || 'not_found')
-        setA({
+        const loaded: Article = {
           id: data.id,
           title: data.title ?? '',
           slug: data.slug ?? '',
@@ -52,7 +56,9 @@ export default function AdminEditArticlePage() {
           ogImage: data.ogImage ?? null,
           canonicalUrl: data.canonicalUrl ?? null,
           noindex: !!data.noindex,
-        })
+        }
+        setA(loaded)
+        prevCatRef.current = loaded.category ?? null
       } catch (e: any) {
         setToast({ kind: 'err', text: e?.message || 'Greška pri učitavanju' })
       } finally {
@@ -85,11 +91,27 @@ export default function AdminEditArticlePage() {
       const data = await res.json()
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'update_failed')
 
+      // posle uspeha revalidiramo: samu vest, listu vesti, i obe kategorije (staru i novu)
+      const slug = a.slug
+      const prevCat = prevCatRef.current
+      const newCat  = a.category ?? null
+
+      const extraPaths: string[] = ['/vesti', `/vesti/${slug}`]
+      if (prevCat) extraPaths.push(`/vesti/k/${prevCat}`)
+      if (newCat && newCat !== prevCat) extraPaths.push(`/vesti/k/${newCat}`)
+
       await fetch('/api/admin/revalidate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug: a.slug, tags: ['articles', `article:${a.slug}`] })
+        body: JSON.stringify({
+          slug,
+          tags: ['articles', `article:${slug}`],
+          paths: extraPaths,
+        })
       }).catch(() => {})
+
+      // ažuriramo "prethodnu" kategoriju za sledeći save
+      prevCatRef.current = newCat
 
       setToast({ kind: 'ok', text: 'Sačuvano.' })
     } catch (e: any) {
@@ -148,7 +170,16 @@ export default function AdminEditArticlePage() {
 
       <div style={{ display: 'grid', gap: 12 }}>
         <label>Kategorija</label>
-        <input value={a.category ?? ''} onChange={e => setA({ ...a, category: e.target.value || null })} style={styles.input} />
+        <select
+          value={a?.category ?? ''}
+          onChange={e => setA(prev => prev ? { ...prev, category: e.target.value || null } : prev)}
+          style={styles.input}
+        >
+          <option value=''>— bez kategorije —</option>
+          {CAT_KEYS.map(k => (
+            <option key={k} value={k}>{CAT_LABELS[k]}</option>
+          ))}
+        </select>
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>
