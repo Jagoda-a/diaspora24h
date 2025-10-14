@@ -1,3 +1,4 @@
+// app/vesti/k/[category]/page.tsx
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { prisma } from '@/lib/db'
@@ -20,9 +21,11 @@ const LABELS: Record<Cat, string> = {
   drustvo: 'Društvo',
 }
 
+// ISR + statički render
 export const dynamic = 'force-static'
 export const revalidate = 300
 
+// Koliko kartica po strani
 const PAGE_SIZE = 24
 
 type Props = {
@@ -52,7 +55,7 @@ export default async function CatPage({ params, searchParams }: Props) {
     prisma.article.count({ where: { category: catKey } }),
     prisma.article.findMany({
       where: { category: catKey },
-      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'asc' }],
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       take: PAGE_SIZE,
       skip: (page - 1) * PAGE_SIZE,
       select: {
@@ -69,7 +72,7 @@ export default async function CatPage({ params, searchParams }: Props) {
   ])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const catCover = `/cats/${catKey}.webp`
+  const catCover = `/cats/${catKey}.webp` // fallback slika iz public/cats
 
   return (
     <main className="container" style={{ padding: '16px 0 32px' }}>
@@ -91,15 +94,17 @@ export default async function CatPage({ params, searchParams }: Props) {
               slug: a.slug,
               title: a.title,
               summary: a.summary,
-              coverImage: a.coverImage ?? catCover, // fallback na cover kategorije
+              // Fallback na kategorijsku sliku ako vest nema cover
+              coverImage: a.coverImage ?? catCover,
               country: a.country,
               publishedAt: a.publishedAt,
-              category: a.category ?? null,
+              category: (a as any).category ?? null,
             }}
           />
         ))}
       </div>
 
+      {/* Paginacija */}
       {totalPages > 1 && (
         <nav className="flex items-center justify-center gap-2 mt-6">
           <PageLink category={catKey} page={page - 1} disabled={page <= 1}>

@@ -1,4 +1,3 @@
-
 @import url('https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css');
 
 
@@ -42,6 +41,12 @@ html, body {
   font-family: 'Gilroy', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   color: var(--fg);
   background: var(--bg);
+}
+
+/* Globalno rasterećenje teksta */
+html, body {
+  font-size: 17px;
+  line-height: 1.7;
 }
 
 /* sr-only helper (za h1 na početnoj) */
@@ -187,17 +192,56 @@ a:hover { text-decoration: underline; }
 }
 .sh-mobile-link:hover { background: var(--surface-weak); }
 
-/* ===============
-   CARDS GRID
-   =============== */
-.cards-grid {
-  display: grid; gap: 16px; grid-template-columns: 1fr;
+/* ===========================
+   GRID-OVI ZA KARTICE/STRANE
+   =========================== */
+
+/* KATEGORIJE: više kolona */
+.cats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
-@media (min-width: 640px) { .cards-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (min-width: 1024px) { .cards-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 640px) { .cats-grid { grid-template-columns: repeat(3, 1fr); gap: 14px; } }
+@media (min-width: 1024px){ .cats-grid { grid-template-columns: repeat(4, 1fr); gap: 16px; } }
+@media (min-width: 1280px){ .cats-grid { grid-template-columns: repeat(5, 1fr); gap: 18px; } }
+
+/* ČLANCI: 1 kolona na mobu, više na desktopu */
+.articles-grid {
+  display: grid;
+  grid-template-columns: 1fr;  /* mobilni */
+  gap: 14px;
+}
+
+@media (min-width: 640px) {
+  .articles-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .articles-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .articles-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px;
+  }
+}
+
+/* Alias zbog stare upotrebe .cards-grid (ponaša se kao cats-grid) */
+.cards-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (min-width: 640px) { .cards-grid { grid-template-columns: repeat(3, 1fr); gap: 14px; } }
+@media (min-width: 1024px){ .cards-grid { grid-template-columns: repeat(4, 1fr); gap: 16px; } }
+@media (min-width: 1280px){ .cards-grid { grid-template-columns: repeat(5, 1fr); gap: 18px; } }
 
 /* ===============
-   CARD
+   CARD (ArticleCard & CategoryTile)
    =============== */
 .card {
   background: var(--card);
@@ -214,7 +258,7 @@ a:hover { text-decoration: underline; }
 
 /* Slika (16:9) */
 .card-cover { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--surface-weak); overflow: hidden; }
-.card-cover img { width: 100%; height: 100%; object-fit: cover; }
+.card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* Sadržaj kartice */
 .card-body { padding: 12px; }
@@ -235,24 +279,81 @@ a:hover { text-decoration: underline; }
 }
 .dot { width: 4px; height: 4px; border-radius: 50%; background: #9ca3af; }
 
-/* =======================
-   GILROY – FONT FACE
-   ======================= */
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Thin.ttf') format('truetype'); font-weight: 100; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-UltraLight.ttf') format('truetype'); font-weight: 200; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Medium.ttf') format('truetype'); font-weight: 500; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Semibold.ttf') format('truetype'); font-weight: 600; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-ExtraBold.ttf') format('truetype'); font-weight: 800; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Heavy.ttf') format('truetype'); font-weight: 900; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Black.ttf') format('truetype'); font-weight: 950; font-style: normal; font-display: swap; }
+/* ===============
+   ARTICLE HERO
+   =============== */
+.article-hero { display: grid; gap: 16px; }
+@media (min-width: 1024px) {
+  .article-hero {
+    grid-template-columns: 600px 1fr; /* slika levo fiksne širine, tekst desno */
+    align-items: start;
+  }
+}
+
+/* MOBILE-FIRST: wrap sa 12:7 odnosom (600x350), crop uvek lep */
+.article-hero .media-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 12 / 7;       /* 600x350 odnos */
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface-weak);
+}
+.article-hero .media-wrap img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;          /* crop */
+}
+
+/* opcioni fine-tune na baš uskim ekranima */
+@media (max-width: 360px) {
+  .article-hero .media-wrap { aspect-ratio: 3 / 2; }
+}
+
+.article-hero .text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.article-hero .title {
+  margin: 0;
+  line-height: 1.15;
+  font-size: clamp(22px, 2.6vw, 34px); /* veći font na desktopu */
+}
+.article-hero .dek {
+  margin: 0;
+  font-size: clamp(17px, 1.8vw, 20px); /* veći opis (ne naslov) */
+  opacity: .9;
+}
+.article-hero .meta {
+  font-size: 14px;
+  color: var(--muted);
+}
 
 /* =======================
    SEARCH UI (ikonica, panel, predlozi)
    ======================= */
 .sh-icon-btn { background: transparent; border: 0; padding: 6px; cursor: pointer; color: var(--fg); }
+.sh-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px; /* fiksno da ne “šeta” */
+  padding: 0; margin: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  line-height: 0;
+}
+.sh-icon-btn:focus { outline: none; }
+.sh-icon-btn:active { transform: none; }
+
+.lang-switch-desktop span,
+.lang-switch span { transition: opacity 0.15s ease; }
+.lang-switch-desktop span:hover,
+.lang-switch span:hover { opacity: 0.6; }
 
 .sh-search-wrap {
   position: sticky; top: 0; z-index: 50;
@@ -312,8 +413,6 @@ a:hover { text-decoration: underline; }
 .sh-search-suggest li .meta .t { font-weight: 600; font-size: 14px; line-height: 1.35; color: var(--fg); }
 .sh-search-suggest li .meta .s { font-size: 12px; color: var(--muted); line-height: 1.35; }
 
-.sh-search-suggest .muted { color: var(--muted); font-size: 14px; padding: 10px; }
-
 /* fine-tune na užim ekranima */
 @media (max-width: 420px) {
   .sh-search-box { padding: 6px 10px; }
@@ -339,7 +438,6 @@ a:hover { text-decoration: underline; }
 /* =========
    FOOTER
    ========= */
-/* FOOTER */
 .footer {
   background: var(--surface);
   color: var(--fg);
@@ -349,10 +447,7 @@ a:hover { text-decoration: underline; }
   text-align: center;
   transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
-
-[data-theme='dark'] .footer {
-  background: var(--surface-weak);
-}
+[data-theme='dark'] .footer { background: var(--surface-weak); }
 
 .footer-inner {
   display: flex;
@@ -360,11 +455,7 @@ a:hover { text-decoration: underline; }
   align-items: center;
   gap: 16px;
 }
-
-.footer-logo img {
-  height: 44px;
-  width: auto;
-}
+.footer-logo img { height: 44px; width: auto; }
 
 .footer-line {
   width: 100%;
@@ -382,16 +473,12 @@ a:hover { text-decoration: underline; }
   gap: 16px;
   font-size: 14px;
 }
-
 .footer-links a {
   color: var(--fg);
   text-decoration: none;
   transition: color 0.2s ease;
 }
-
-.footer-links a:hover {
-  color: var(--muted);
-}
+.footer-links a:hover { color: var(--muted); }
 
 /* Social ikone */
 .footer-social {
@@ -402,12 +489,10 @@ a:hover { text-decoration: underline; }
   font-size: 22px;
   margin-top: 4px;
 }
-
 .footer-social a {
   color: var(--fg);
   transition: color 0.2s ease, transform 0.2s ease;
 }
-
 .footer-social a:hover {
   color: var(--muted);
   transform: translateY(-2px);
@@ -420,103 +505,21 @@ a:hover { text-decoration: underline; }
   margin: 4px 0 0;
 }
 
-/* Logo switch */
+/* Logo switch (footer) */
 .logo-dark { display: none; }
 .logo-light { display: inline-block; }
 [data-theme='dark'] .logo-dark { display: inline-block; }
 [data-theme='dark'] .logo-light { display: none; }
 
-/* Mobile responsive */
+/* Mobile responsive (footer) */
 @media (max-width: 640px) {
-  .footer-links {
-    gap: 10px;
-    font-size: 13px;
-  }
-
-  .footer-social {
-    gap: 14px;
-    font-size: 20px;
-  }
+  .footer-links { gap: 10px; font-size: 13px; }
+  .footer-social { gap: 14px; font-size: 20px; }
 }
 
 /* ===============
-   ARTICLE HERO
+   SITE FOOTER WRAP (ako ga koristiš odvojeno)
    =============== */
-.article-hero { display: grid; gap: 16px; }
-@media (min-width: 1024px) {
-  .article-hero {
-    grid-template-columns: 600px 1fr; /* slika levo fiksne širine, tekst desno */
-    align-items: start;
-  }
-}
-
-/* MOBILE-FIRST: wrap sa 12:7 odnosom (600x350), crop uvek lep */
-.article-hero .media-wrap {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 12 / 7;       /* 600x350 odnos */
-  overflow: hidden;
-  border-radius: 12px;
-  background: var(--surface-weak);
-}
-.article-hero .media-wrap img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;          /* crop */
-}
-
-/* opcioni fine-tune na baš uskim ekranima */
-@media (max-width: 360px) {
-  .article-hero .media-wrap { aspect-ratio: 3 / 2; }
-}
-
-.article-hero .text {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.article-hero .title {
-  margin: 0;
-  line-height: 1.15;
-  font-size: clamp(22px, 2.6vw, 34px); /* veći font na desktopu */
-}
-.article-hero .dek {
-  margin: 0;
-  font-size: clamp(17px, 1.8vw, 20px); /* veći opis (ne naslov) */
-  opacity: .9;
-}
-.article-hero .meta {
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.sh-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px; height: 36px; /* fiksno da ne “šeta” */
-  padding: 0; margin: 0;
-  background: transparent;
-  border: 0;
-  outline: none;
-  line-height: 0;
-}
-
-.sh-icon-btn:focus { outline: none; }
-.sh-icon-btn:active { transform: none; }
-
-.lang-switch-desktop span,
-.lang-switch span {
-  transition: opacity 0.15s ease;
-}
-.lang-switch-desktop span:hover,
-.lang-switch span:hover {
-  opacity: 0.6;
-}
-
-
 .site-footer {
   background: var(--surface);
   color: var(--fg);
@@ -526,19 +529,9 @@ a:hover { text-decoration: underline; }
   text-align: center;
   transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
-
-[data-theme='dark'] .site-footer {
-  background: var(--surface-weak);
-}
-.site-footer,
-.site-footer * {
-  background: var(--surface) !important;
-}
-
-[data-theme='dark'] .site-footer,
-[data-theme='dark'] .site-footer * {
-  background: var(--surface-weak) !important;
-}
+[data-theme='dark'] .site-footer { background: var(--surface-weak); }
+.site-footer, .site-footer * { background: var(--surface) !important; }
+[data-theme='dark'] .site-footer, [data-theme='dark'] .site-footer * { background: var(--surface-weak) !important; }
 
 /* ==== PROČITAJ JOŠ: horizontalni scroller ==== */
 .rel-scroll {
@@ -547,35 +540,24 @@ a:hover { text-decoration: underline; }
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
-  padding-bottom: 6px; /* malo prostora da se nečeše za ivicu */
+  padding-bottom: 6px;
   border-radius: 10px;
 }
-
 .rel-row {
   display: grid;
   grid-auto-flow: column;
   gap: 16px;
   grid-auto-columns: 82%;
 }
+@media (min-width: 640px) { .rel-row { grid-auto-columns: 48%; } }
+@media (min-width: 1024px){ .rel-row { grid-auto-columns: 32%; } }
+.rel-card { scroll-snap-align: start; text-decoration: none; min-width: 0; }
 
-@media (min-width: 640px) {
-  .rel-row { grid-auto-columns: 48%; }
-}
-@media (min-width: 1024px) {
-  .rel-row { grid-auto-columns: 32%; }
-}
-
-.rel-card {
-  scroll-snap-align: start;
-  text-decoration: none;
-  min-width: 0; /* za duge naslove da se ne rastežu */
-}
-
-/* Article typography – aktivira našu "prose" klasu i čitljivost */
+/* Article typography – čitljivost */
 .prose {
-  font-size: 17px;          /* ~text-base+ */
+  font-size: 17px;
   line-height: 1.8;
-  max-width: 70ch;          /* čitljiva širina */
+  max-width: 70ch;
 }
 .prose p { margin: 0 0 1em; }
 .prose h2 { font-size: 1.35em; margin: 1.2em 0 0.6em; line-height: 1.3; }
@@ -584,99 +566,16 @@ a:hover { text-decoration: underline; }
 .prose li { margin: 0.25em 0; }
 .prose img { display: block; max-width: 100%; height: auto; margin: 1em auto; }
 
-/* Globalno rasterećenje teksta */
-html, body {
-  font-size: 17px;
-  line-height: 1.7;
-}
-
-
-
-/* GRID ZA LISTE KARTICA */
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-@media (min-width: 640px) {
-  .cards-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-  }
-}
-
-@media (min-width: 1024px) {
-  .cards-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 16px;
-  }
-}
-
-@media (min-width: 1280px) {
-  .cards-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 18px;
-  }
-}
-
-/* OPŠTI STIL ZA NEWS KARTICE (ArticleCard) */
-.card {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.card-cover {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  background: #f3f4f6;
-  overflow: hidden;
-}
-
-.card-body {
-  padding: 12px;
-}
-
-.card-title {
-  margin: 6px 0 6px 0;
-  font-size: 16px;
-  line-height: 1.25;
-}
-
-.card-title a {
-  color: #111827;
-  text-decoration: none;
-}
-
-.card-title a:hover {
-  text-decoration: underline;
-}
-
-.card-summary {
-  margin: 0;
-  color: #4b5563;
-  font-size: 13px;
-}
-
-.badge {
-  display: inline-block;
-  font-size: 11px;
-  line-height: 1;
-  padding: 5px 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  background: #fff;
-  color: #374151;
-  text-decoration: none;
-}
-
-.dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: #d1d5db;
-  display: inline-block;
-}
+/* =======================
+   GILROY – FONT FACE
+   ======================= */
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Thin.ttf') format('truetype'); font-weight: 100; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-UltraLight.ttf') format('truetype'); font-weight: 200; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Light.ttf') format('truetype'); font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Medium.ttf') format('truetype'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Semibold.ttf') format('truetype'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-ExtraBold.ttf') format('truetype'); font-weight: 800; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Heavy.ttf') format('truetype'); font-weight: 900; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Black.ttf') format('truetype'); font-weight: 950; font-style: normal; font-display: swap; }
