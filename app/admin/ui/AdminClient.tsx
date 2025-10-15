@@ -1,11 +1,11 @@
 // app/admin/ui/AdminClient.tsx
 'use client'
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AdminList from './AdminList'
 
-type NavId = 'new' | 'edit' | 'backfill' | 'list'
+type NavId = 'new' | 'edit' | 'backfill' | 'reclassify' | 'list'
 
 /** Jednostavne monochrome ikonice (SVG, currentColor) */
 const IconPlus: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -24,6 +24,12 @@ const IconPuzzle: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     <path d="M8 4h3a2 2 0 012 2v0a2 2 0 104 0h3v4a2 2 0 01-2 2h-1a2 2 0 100 4h1a2 2 0 012 2v4h-4a2 2 0 01-2-2v-1a2 2 0 10-4 0v1a2 2 0 01-2 2H4v-4a2 2 0 012-2h1a2 2 0 100-4H6a2 2 0 01-2-2V4h4z" strokeLinejoin="round"/>
   </svg>
 )
+const IconRotate: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" {...props}>
+    <path d="M3 12a9 9 0 1 0 3-6.708" strokeLinecap="round"/>
+    <path d="M3 4v4h4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+)
 const IconList: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" {...props}>
     <path d="M8 6h13M8 12h13M8 18h13" strokeLinecap="round" />
@@ -36,10 +42,28 @@ const IconList: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 type IconType = React.ComponentType<React.SVGProps<SVGSVGElement>>
 
 const NAV: Array<{ id: NavId; title: string; Icon: IconType }> = [
-  { id: 'new',      title: 'Dodaj vest',  Icon: IconPlus },
-  { id: 'edit',     title: 'Uredi vest',  Icon: IconEdit },
-  { id: 'backfill', title: 'Backfill',    Icon: IconPuzzle },
-  { id: 'list',     title: 'Lista vesti', Icon: IconList },
+  { id: 'new',        title: 'Dodaj vest',     Icon: IconPlus },
+  { id: 'edit',       title: 'Uredi vest',     Icon: IconEdit },
+  { id: 'backfill',   title: 'Backfill',       Icon: IconPuzzle },
+  { id: 'reclassify', title: 'Reclassify',     Icon: IconRotate },
+  { id: 'list',       title: 'Lista vesti',    Icon: IconList },
+]
+
+// Putanje kategorija koje čistimo revalidate-om
+const CAT_PATHS = [
+  '/', '/vesti',
+  '/vesti/k/politika',
+  '/vesti/k/hronika',
+  '/vesti/k/sport',
+  '/vesti/k/ekonomija',
+  '/vesti/k/tehnologija',
+  '/vesti/k/kultura',
+  '/vesti/k/zdravlje',
+  '/vesti/k/lifestyle',
+  '/vesti/k/zanimljivosti',
+  '/vesti/k/svet',
+  '/vesti/k/region',
+  '/vesti/k/drustvo',
 ]
 
 export default function AdminClient() {
@@ -84,7 +108,7 @@ export default function AdminClient() {
     }
   }
 
-  // ====== BACKFILL ======
+  // ====== BACKFILL (postojeći) ======
   const [adminToken, setAdminToken] = useState('')
   const [bfLimit, setBfLimit] = useState(200)
   const [bfOnlyMissing, setBfOnlyMissing] = useState(true)
@@ -114,7 +138,7 @@ export default function AdminClient() {
 
   const [busyCat, setBusyCat] = useState(false)
   const [catLimit, setCatLimit] = useState(300)
-  const [catDry, setCatDry] = useState(false)
+  const [catDry, setCatDry] = useState(false) // ostavljeno kao primer; koristiš runBackfillCategories ispod
 
   async function runBackfillCategories() {
     setBusyCat(true)
@@ -134,13 +158,109 @@ export default function AdminClient() {
     }
   }
 
+  // ====== RECLASSIFY (novo) ======
+  const [rcToken, setRcToken] = useState('')     // ADMIN_TOKEN
+  const [rcBatch, setRcBatch] = useState(250)    // 50–1000
+  const [rcDry, setRcDry] = useState(false)
+  const [rcAutoRevalidate, setRcAutoRevalidate] = useState(true)
+  const [rcRunning, setRcRunning] = useState(false)
+  const [rcBatches, setRcBatches] = useState(0)
+  const [rcUpdatedTotal, setRcUpdatedTotal] = useState(0)
+  const [rcLastUpdated, setRcLastUpdated] = useState(0)
+  const [rcLog, setRcLog] = useState<string[]>([])
+  const rcCursorRef = useRef<string | null>(null)
+
+  async function rcRunOnce() {
+    const res = await fetch('/api/admin/reclassify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': rcToken || '',
+      },
+      body: JSON.stringify({
+        cursor: rcCursorRef.current,
+        take: rcBatch,
+        dryRun: rcDry,
+      }),
+    })
+    if (!res.ok) {
+      const txt = await res.text().catch(() => `${res.status}`)
+      throw new Error(`API error: ${txt}`)
+    }
+    const data = await res.json()
+    if (!data?.ok) throw new Error('API response not ok')
+
+    rcCursorRef.current = data.done ? null : data.cursor ?? null
+    setRcUpdatedTotal(u => u + (data.updated || 0))
+    setRcBatches(b => b + 1)
+    setRcLastUpdated(data.updated || 0)
+    setRcLog(l => [
+      `#${String(rcBatches + 1).padStart(3, '0')}  batch=${data.batch}  updated=${data.updated}  cursor=${data.cursor ?? '∅'}  done=${data.done ? '✓' : '…'}`,
+      ...l,
+    ])
+    return !!data.done
+  }
+
+  const [rvBusy, setRvBusy] = useState(false)
+  async function runRevalidateAll() {
+    setRvBusy(true)
+    try {
+      // Ova tvoja ruta čita admin_session cookie, tako da token ne šaljemo ovde.
+      const res = await fetch('/api/admin/revalidate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paths: CAT_PATHS,
+          // tags: ['articles'], // Dodaj ako koristiš tag-based caching
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'revalidate_failed')
+      setToast({ kind: 'ok', text: 'Keš osvežen (revalidate).' })
+    } catch (e: any) {
+      setToast({ kind: 'err', text: e?.message || 'Greška pri revalidate' })
+    } finally {
+      setRvBusy(false)
+    }
+  }
+
+  async function rcRunAll() {
+    if (!rcToken) {
+      alert('Unesi ADMIN_TOKEN pa pokreni.')
+      return
+    }
+    setRcRunning(true)
+    setRcBatches(0)
+    setRcUpdatedTotal(0)
+    setRcLastUpdated(0)
+    setRcLog([])
+    rcCursorRef.current = null
+    try {
+      for (let i = 0; i < 10000; i++) {
+        const done = await rcRunOnce()
+        if (done) break
+        await new Promise(r => setTimeout(r, 100))
+      }
+      if (rcAutoRevalidate) {
+        await runRevalidateAll()
+      }
+      setRcLog(l => ['💾 Gotovo — re-klasifikacija završena.', ...l])
+      setToast({ kind: 'ok', text: 'Reclassify završeno.' })
+    } catch (e: any) {
+      setRcLog(l => [`⚠️ Greška: ${e?.message || e}`, ...l])
+      setToast({ kind: 'err', text: e?.message || 'Greška u reclassify' })
+    } finally {
+      setRcRunning(false)
+    }
+  }
+
   // ====== UI (neutralno; global.css vodi dark/light) ======
   const styles = useMemo(() => ({
     shell: {
       display: 'grid',
-      gridTemplateColumns: '260px 1fr', // desktop: širi sidebar sa tekstom
+      gridTemplateColumns: '260px 1fr',
       minHeight: '100vh',
-      maxWidth: '100%',                 // širina puštena na ceo viewport
+      maxWidth: '100%',
       margin: '0 auto',
     } as React.CSSProperties,
     sidebar: {
@@ -162,13 +282,9 @@ export default function AdminClient() {
       gap: 10,
       fontSize: 15,
       whiteSpace: 'nowrap',
-      color: 'inherit',                 // 🔥 ikonice i tekst prate temu
+      color: 'inherit',
     }) as React.CSSProperties,
-    main: {
-      padding: 24,
-      minHeight: 0,
-      overflow: 'auto',
-    } as React.CSSProperties,
+    main: { padding: 24, minHeight: 0, overflow: 'auto' } as React.CSSProperties,
     card: {
       border: '1px solid rgba(127,127,127,0.25)',
       borderRadius: 12,
@@ -229,10 +345,10 @@ export default function AdminClient() {
             justify-content: center;
           }
           main[data-admin-main] {
-            padding: 12px !important;   /* više mesta za sadržaj */
+            padding: 12px !important;
           }
           main[data-admin-main] .container {
-            margin: 0 4px;              /* blage margine */
+            margin: 0 4px;
           }
         }
       `}</style>
@@ -400,6 +516,96 @@ export default function AdminClient() {
                 <button onClick={handleDeleteAll} style={styles.btnDangerSolid}>
                   OBRIŠI SVE VESTI
                 </button>
+              </div>
+            </section>
+          )}
+
+          {/* RECLASSIFY (novo) */}
+          {active === 'reclassify' && (
+            <section style={{ display: 'grid', gap: 18 }}>
+              <div style={styles.card}>
+                <h2 style={styles.h2}>Reclassify (prepakuj kategorije)</h2>
+                <p style={{ marginTop: 0, color: 'var(--muted)' }}>
+                  Na klik prolazi sve vesti u batch-evima i smešta u pravu kategoriju prema <code>lib/cats.ts</code>.
+                </p>
+
+                <div style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <input
+                      type="password"
+                      placeholder="ADMIN_TOKEN (obavezno)"
+                      value={rcToken}
+                      onChange={e => setRcToken(e.target.value)}
+                      style={{ ...styles.input, flex: 1, minWidth: 260 }}
+                    />
+                    <input
+                      type="number"
+                      min={50}
+                      max={1000}
+                      value={rcBatch}
+                      onChange={e => setRcBatch(Math.max(50, Math.min(1000, parseInt(e.target.value || '250', 10))))}
+                      style={{ ...styles.input, width: 120 }}
+                      title="Veličina batch-a (50–1000)"
+                    />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="checkbox" checked={rcDry} onChange={e => setRcDry(e.target.checked)} />
+                      Dry run (ne upisuj)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="checkbox" checked={rcAutoRevalidate} onChange={e => setRcAutoRevalidate(e.target.checked)} />
+                      Auto revalidate posle run-a
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button onClick={rcRunAll} disabled={rcRunning} style={styles.btnPrimary}>
+                      {rcRunning ? 'Radim…' : 'Reclassify sve'}
+                    </button>
+                    <button onClick={rcRunOnce} disabled={rcRunning || !rcToken} style={styles.btn}>
+                      Jedan batch
+                    </button>
+                    <button onClick={runRevalidateAll} disabled={rvBusy} style={styles.btn}>
+                      {rvBusy ? 'Keš…' : 'Osveži keš (revalidate)'}
+                    </button>
+                  </div>
+
+                  <div
+                    style={{
+                      padding: '10px 12px',
+                      border: '1px solid var(--border)',
+                      borderRadius: 10,
+                      background: 'var(--surface)',
+                      display: 'flex',
+                      gap: 16,
+                      flexWrap: 'wrap'
+                    }}
+                  >
+                    <div>Batch-eva: <b>{rcBatches}</b></div>
+                    <div>Ukupno ažurirano: <b>{rcUpdatedTotal}</b></div>
+                    <div>Zadnji batch (updated): <b>{rcLastUpdated}</b></div>
+                  </div>
+
+                  <div
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 10,
+                      background: 'var(--card)',
+                      padding: 12,
+                      minHeight: 160,
+                      maxHeight: 420,
+                      overflow: 'auto',
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {rcLog.length === 0 ? (
+                      <div style={{ opacity: .6 }}>Log će se pojavljivati ovde…</div>
+                    ) : (
+                      rcLog.map((l, i) => <div key={i}>{l}</div>)
+                    )}
+                  </div>
+                </div>
               </div>
             </section>
           )}

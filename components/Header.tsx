@@ -97,19 +97,6 @@ export default function Header() {
     })
   }
 
-  // Jezik preko cookie-a (bez /en /de ruta)
-  async function setLang(lang: 'sr' | 'en' | 'de') {
-    try {
-      await fetch('/api/lang', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lang })
-      })
-      router.refresh()
-    } catch {}
-  }
-
-  // Tema (bez React stanja — izbegavamo reflow): menjamo data-theme + localStorage.
   function toggleTheme() {
     try {
       const root = document.documentElement
@@ -145,30 +132,12 @@ export default function Header() {
               />
             </Link>
 
-            {/* Desktop navigacija (desno) */}
-            <nav className="sh-nav-desktop">
+            {/* Desktop navigacija */}
+            <nav className="sh-nav-desktop" aria-label="Glavna navigacija">
               <Link className="sh-nav-link sh-nav-bold" href="/">Početna</Link>
               <Link className="sh-nav-link sh-nav-bold" href="/vesti">Vesti</Link>
               <Link className="sh-nav-link sh-nav-bold" href="/kontakt">Kontakt</Link>
               <Link className="sh-nav-link sh-nav-bold" href="/o-nama">O nama</Link>
-
-              {/* Language switch (desktop) */}
-              <div
-              className="lang-switch-desktop"
-              style={{
-                display: 'inline-flex',
-                gap: 6,
-                alignItems: 'center',
-                marginLeft: 8,
-                fontSize: 14,
-                cursor: 'pointer',
-                userSelect: 'none'
-              }}
-            >
-              <span onClick={() => setLang('sr')} title="Srpski">SR</span>|
-              <span onClick={() => setLang('en')} title="English">EN</span>|
-              <span onClick={() => setLang('de')} title="Deutsch">DE</span>
-            </div>
 
               {/* Pretraga (desktop) */}
               <button
@@ -188,14 +157,13 @@ export default function Header() {
                 </svg>
               </button>
 
-              {/* Theme toggle (desktop) — isti element/klase/dimenzije kao search; bez teksta i frame-a */}
+              {/* Theme toggle (desktop) */}
               <button
                 className="sh-icon-btn hide-on-mobile theme-toggle"
                 aria-label="Promeni temu"
                 title="Promeni temu"
                 onClick={toggleTheme}
               >
-                {/* Renderujemo oba SVG-a; prikaz rešava CSS po data-theme (nema reflow-a) */}
                 <span className="icon-light">
                   <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
@@ -210,7 +178,7 @@ export default function Header() {
               </button>
             </nav>
 
-            {/* Desni deo: search ikona (MOBILE) + theme + hamburger */}
+            {/* Desni deo: search (mobile) + theme + hamburger */}
             <div className="sh-right">
               <button
                 className="sh-icon-btn show-on-mobile"
@@ -229,7 +197,7 @@ export default function Header() {
                 </svg>
               </button>
 
-              {/* Theme toggle (mobile) — identična struktura kao search; bez wrappera i margina */}
+              {/* Theme toggle (mobile) */}
               <button
                 className="sh-icon-btn show-on-mobile theme-toggle"
                 aria-label="Promeni temu"
@@ -352,40 +320,27 @@ export default function Header() {
             <Link href="/vesti" className="sh-mobile-link">Vesti</Link>
             <Link href="/kontakt" className="sh-mobile-link">Kontakt</Link>
           </nav>
-
-          <div
-            className="lang-switch"
-            style={{
-              padding: '8px 12px',
-              display: 'flex',
-              gap: 6,
-              alignItems: 'center',
-              fontSize: 16,
-              cursor: 'pointer',
-              userSelect: 'none'
-            }}
-          >
-            <span onClick={() => setLang('sr')}>SR</span>|
-            <span onClick={() => setLang('en')}>EN</span>|
-            <span onClick={() => setLang('de')}>DE</span>
-          </div>
-
         </div>
 
         <button className="sh-backdrop" aria-label="Zatvori" onClick={() => setOpen(false)} />
       </div>
 
-      {/* Scoped CSS samo za toggle ikone da ne menjaš globals.css */}
+      {/* HARDENING: digni header iznad svega i forsiraj pointer-events u headeru */}
       <style jsx>{`
-        .theme-toggle { line-height: 0; padding: 0; margin: 0; border: 0; background: transparent; }
+        :global(.site-header){ position:sticky; top:0; z-index:2147483647; }
+        :global(.site-header, .site-header *){
+          pointer-events:auto !important;
+        }
+        :global(.sh-nav-desktop){ position:relative; z-index:2147483646; }
+        :global(.sh-right){ position:relative; z-index:2147483646; }
+        :global(.sh-icon-btn svg){ pointer-events:none; }
 
-        /* Po difoltu (light) pokazujemo mesec, krijemo sunce */
-        .theme-toggle .icon-light { display: inline-flex; }
-        .theme-toggle .icon-dark { display: none; }
-
-        /* U dark temi obrnuto — bez layout shift-a jer obe ikone su iste veličine */
-        :global([data-theme='dark']) .theme-toggle .icon-light { display: none; }
-        :global([data-theme='dark']) .theme-toggle .icon-dark { display: inline-flex; }
+        /* Theme prikaz (fallback ako global ne radi) */
+        .theme-toggle { line-height:0; padding:0; margin:0; border:0; background:transparent; }
+        :global(.theme-toggle .icon-light){ display:inline-flex !important; }
+        :global(.theme-toggle .icon-dark){ display:none !important; }
+        :global([data-theme='dark'] .theme-toggle .icon-light){ display:none !important; }
+        :global([data-theme='dark'] .theme-toggle .icon-dark){ display:inline-flex !important; }
       `}</style>
     </>
   )

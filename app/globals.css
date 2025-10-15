@@ -82,7 +82,10 @@ a:hover { text-decoration: underline; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.sh-wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
+.sh-wrap {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 0; position: relative;
+}
 .sh-brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; flex-shrink: 0; }
 
 /* Logo responsive (CSS prepisuje width/height) */
@@ -108,17 +111,52 @@ a:hover { text-decoration: underline; }
 [data-theme='dark'] .logo-img-mobile.logo-light { display: none; }
 
 /* Desktop nav */
-.sh-nav-desktop { display: none; gap: 14px; align-items: center; margin-left: auto; }
+.sh-nav-desktop {
+  display: none; gap: 14px; align-items: center; margin-left: auto;
+  flex: 0 1 auto; position: relative; z-index: 1; min-width: 0;
+}
 .sh-nav-link {
   font-size: 14px; color: var(--fg);
   padding: 6px 10px; border-radius: 8px; text-decoration: none;
 }
 .sh-nav-link:hover { background: var(--badge-bg); color: var(--fg); }
-/* Bold na desktop linkovima */
 .sh-nav-bold { font-weight: 700; }
 
-/* Desni blok (search ikona + hamburger) – mobilno */
-.sh-right { display: inline-flex; align-items: center; gap: 8px; }
+/* Desni blok */
+.sh-right {
+  display: inline-flex; align-items: center; gap: 8px;
+  position: relative; z-index: 2; flex: 0 0 auto;
+}
+
+/* Ikonice i klik */
+.sh-icon-btn { background: transparent; border: 0; padding: 6px; cursor: pointer; color: var(--fg); }
+.sh-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px;
+  padding: 0; margin: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  line-height: 0;
+  position: relative; z-index: 3; pointer-events: auto;
+}
+.sh-icon-btn svg { pointer-events: none; }
+.sh-icon-btn:focus { outline: none; }
+.sh-icon-btn:active { transform: none; }
+
+/* Theme toggle – vidljivost ikonica rešena globalno sa !important */
+.theme-toggle { line-height: 0; padding: 0; margin: 0; border: 0; background: transparent; }
+.theme-toggle .icon-light { display: inline-flex !important; }
+.theme-toggle .icon-dark  { display: none !important; }
+[data-theme='dark'] .theme-toggle .icon-light { display: none !important; }
+[data-theme='dark'] .theme-toggle .icon-dark  { display: inline-flex !important; }
+
+.lang-switch-desktop span,
+.lang-switch span { transition: opacity 0.15s ease; }
+.lang-switch-desktop span:hover,
+.lang-switch span:hover { opacity: 0.6; }
 
 /* Hamburger (samo mobilno) */
 .sh-burger {
@@ -146,24 +184,20 @@ a:hover { text-decoration: underline; }
 
 /* Desktop breakpoint */
 @media (min-width: 768px) {
-  /* za desktop */
   .hide-on-mobile { display: inline-flex !important; }
   .show-on-mobile { display: none !important; }
   .hide-on-desktop { display: none !important; }
   .show-on-desktop { display: inline-flex !important; }
 
-  /* specifično za header */
   .sh-burger { display: none !important; }
   .sh-nav-desktop { display: flex !important; }
 }
 
 /* Mobile breakpoint */
 @media (max-width: 767px) {
-  /* za mobilni */
   .hide-on-desktop { display: inline-flex !important; }
   .show-on-desktop { display: none !important; }
 
-  /* specifično za header */
   .sh-burger { display: inline-flex !important; }
   .sh-nav-desktop { display: none !important; }
 }
@@ -209,7 +243,7 @@ a:hover { text-decoration: underline; }
 /* ČLANCI: 1 kolona na mobu, više na desktopu */
 .articles-grid {
   display: grid;
-  grid-template-columns: 1fr;  /* mobilni */
+  grid-template-columns: 1fr;
   gap: 14px;
 }
 
@@ -285,7 +319,7 @@ a:hover { text-decoration: underline; }
 .article-hero { display: grid; gap: 16px; }
 @media (min-width: 1024px) {
   .article-hero {
-    grid-template-columns: 600px 1fr; /* slika levo fiksne širine, tekst desno */
+    grid-template-columns: 600px 1fr;
     align-items: start;
   }
 }
@@ -294,7 +328,7 @@ a:hover { text-decoration: underline; }
 .article-hero .media-wrap {
   position: relative;
   width: 100%;
-  aspect-ratio: 12 / 7;       /* 600x350 odnos */
+  aspect-ratio: 12 / 7;
   overflow: hidden;
   border-radius: 12px;
   background: var(--surface-weak);
@@ -304,10 +338,9 @@ a:hover { text-decoration: underline; }
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;          /* crop */
+  object-fit: cover;
 }
 
-/* opcioni fine-tune na baš uskim ekranima */
 @media (max-width: 360px) {
   .article-hero .media-wrap { aspect-ratio: 3 / 2; }
 }
@@ -320,11 +353,11 @@ a:hover { text-decoration: underline; }
 .article-hero .title {
   margin: 0;
   line-height: 1.15;
-  font-size: clamp(22px, 2.6vw, 34px); /* veći font na desktopu */
+  font-size: clamp(22px, 2.6vw, 34px);
 }
 .article-hero .dek {
   margin: 0;
-  font-size: clamp(17px, 1.8vw, 20px); /* veći opis (ne naslov) */
+  font-size: clamp(17px, 1.8vw, 20px);
   opacity: .9;
 }
 .article-hero .meta {
@@ -333,28 +366,8 @@ a:hover { text-decoration: underline; }
 }
 
 /* =======================
-   SEARCH UI (ikonica, panel, predlozi)
+   SEARCH UI
    ======================= */
-.sh-icon-btn { background: transparent; border: 0; padding: 6px; cursor: pointer; color: var(--fg); }
-.sh-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px; height: 36px; /* fiksno da ne “šeta” */
-  padding: 0; margin: 0;
-  background: transparent;
-  border: 0;
-  outline: none;
-  line-height: 0;
-}
-.sh-icon-btn:focus { outline: none; }
-.sh-icon-btn:active { transform: none; }
-
-.lang-switch-desktop span,
-.lang-switch span { transition: opacity 0.15s ease; }
-.lang-switch-desktop span:hover,
-.lang-switch span:hover { opacity: 0.6; }
-
 .sh-search-wrap {
   position: sticky; top: 0; z-index: 50;
   background: color-mix(in oklab, var(--bg) 98%, transparent);
@@ -373,7 +386,7 @@ a:hover { text-decoration: underline; }
 }
 .sh-search-close { background: transparent; border: 0; font-size: 18px; cursor: pointer; color: var(--muted); }
 
-/* LIVE SEARCH LISTA (responsive, bez sečenja teksta) */
+/* LIVE SEARCH LISTA */
 .sh-search-suggest {
   margin-top: 8px;
   list-style: none;
@@ -403,7 +416,7 @@ a:hover { text-decoration: underline; }
   width: 54px; height: 36px; border-radius: 6px; object-fit: cover; background: #eee;
 }
 
-/* tekst da se NE odseca, neka se lepo prelomi */
+/* tekst da se ne odseca */
 .sh-search-suggest li .meta .t,
 .sh-search-suggest li .meta .s {
   overflow-wrap: anywhere;
@@ -413,7 +426,6 @@ a:hover { text-decoration: underline; }
 .sh-search-suggest li .meta .t { font-weight: 600; font-size: 14px; line-height: 1.35; color: var(--fg); }
 .sh-search-suggest li .meta .s { font-size: 12px; color: var(--muted); line-height: 1.35; }
 
-/* fine-tune na užim ekranima */
 @media (max-width: 420px) {
   .sh-search-box { padding: 6px 10px; }
   .sh-search-suggest li {
@@ -426,7 +438,6 @@ a:hover { text-decoration: underline; }
   .sh-search-suggest li .meta .s { font-size: 11.5px; }
 }
 
-/* ultra usko + safe-area */
 @media (max-width: 360px) {
   .sh-search-wrap .container {
     padding-left: max(8px, env(safe-area-inset-left));
@@ -480,7 +491,6 @@ a:hover { text-decoration: underline; }
 }
 .footer-links a:hover { color: var(--muted); }
 
-/* Social ikone */
 .footer-social {
   display: flex;
   justify-content: center;
@@ -498,7 +508,6 @@ a:hover { text-decoration: underline; }
   transform: translateY(-2px);
 }
 
-/* Copyright */
 .footer-copy {
   font-size: 13px;
   color: var(--muted);
@@ -511,14 +520,13 @@ a:hover { text-decoration: underline; }
 [data-theme='dark'] .logo-dark { display: inline-block; }
 [data-theme='dark'] .logo-light { display: none; }
 
-/* Mobile responsive (footer) */
 @media (max-width: 640px) {
   .footer-links { gap: 10px; font-size: 13px; }
   .footer-social { gap: 14px; font-size: 20px; }
 }
 
 /* ===============
-   SITE FOOTER WRAP (ako ga koristiš odvojeno)
+   SITE FOOTER WRAP
    =============== */
 .site-footer {
   background: var(--surface);
@@ -566,7 +574,6 @@ a:hover { text-decoration: underline; }
 .prose li { margin: 0.25em 0; }
 .prose img { display: block; max-width: 100%; height: auto; margin: 1em auto; }
 
-
 /* Objavljeno u dva reda */
 .col-published { white-space: normal; }
 .col-published .pub-date,
@@ -574,9 +581,6 @@ a:hover { text-decoration: underline; }
   display: block;
   line-height: 1.2;
 }
-
-
-
 
 /* =======================
    GILROY – FONT FACE
@@ -591,6 +595,3 @@ a:hover { text-decoration: underline; }
 @font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-ExtraBold.ttf') format('truetype'); font-weight: 800; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Heavy.ttf') format('truetype'); font-weight: 900; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Gilroy'; src: url('/fonts/Gilroy-Black.ttf') format('truetype'); font-weight: 950; font-style: normal; font-display: swap; }
-
-
-

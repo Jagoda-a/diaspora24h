@@ -9,42 +9,57 @@ datasource db {
 
 model Article {
   id          String   @id @default(cuid())
+
   country     String
+  language    String    @default("sr")
+
   title       String
-  slug        String   @unique
+  slug        String    @unique
   summary     String
+  content     String?
+
   coverImage  String?
   sourceUrl   String?
   sourcesJson String?
-  language    String    @default("sr")
+
+  // Kategorija: default prebačen na "drustvo" (bolji fallback od "nepoznato")
+  category    String    @default("drustvo")
+
+  // Tema/anti-dupe ključ (opciono)
+  topicKey    String?
+
+  // Timestamps
   publishedAt DateTime?
-  content     String?
-  category    String    @default("nepoznato")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  // NOVO: ključ teme (anti-dupe među različitim izvorima)
-  // Ostavljamo ga opcionalnim zbog postojećih redova.
-  topicKey    String?
+  // --- SEO ---
+  seoTitle        String?
+  seoDescription  String?
+  ogImage         String?
+  canonicalUrl    String?
+  noindex         Boolean?
 
-  // indeksi
+  // Prevedeni sadržaji (ako koristiš)
+  translationsJson String?
+
+  // --- Re-classify meta (opciono, ali korisno za audit) ---
+  reclassifiedAt  DateTime?
+  categoryPrev    String?
+
+  // ----- Indeksi -----
+  // već postojećI:
   @@index([category, publishedAt])
   @@index([createdAt])
   @@index([sourceUrl])
 
+  // dodati:
+  @@index([category], name: "idx_article_category_only")
+  @@index([publishedAt, createdAt], name: "idx_article_published_created")
+  @@index([country], name: "idx_article_country")
+  @@index([language], name: "idx_article_language")
+
   // kompozitni unique: ne dozvoljava dve vesti iste teme u istoj zemlji
   // (u Postgresu više NULL vrednosti je dozvoljeno – migracija bez zastoja)
-  @@unique([topicKey, country])
-
-  translationsJson String?
-
-  // --- SEO ---
-  seoTitle        String?   // ručni <title> override
-  seoDescription  String?   // ručni meta description
-  ogImage         String?   // ručni og:image (ako želiš drugačiju od coverImage)
-  canonicalUrl    String?   // canonical link
-  noindex         Boolean?  // ako želiš da isključiš iz indexa
-  // opcionalno:
-  // twitterTitle   String?
-  // twitterDesc    String?
+  @@unique([topicKey, country], name: "uq_article_topickey_country")
 }

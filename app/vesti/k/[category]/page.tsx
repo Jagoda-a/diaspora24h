@@ -5,7 +5,16 @@ import { prisma } from '@/lib/db'
 import ArticleCard from '@/components/ArticleCard'
 import { CAT_KEYS, type Cat } from '@/lib/cats'
 
-// Lokalna mapa za prikazne nazive (ne zavisimo od CATS.label)
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+const PAGE_SIZE = 24
+
+type Props = {
+  params: { category: Cat }
+  searchParams?: { page?: string }
+}
+
 const LABELS: Record<Cat, string> = {
   politika: 'Politika',
   hronika: 'Hronika',
@@ -21,25 +30,9 @@ const LABELS: Record<Cat, string> = {
   drustvo: 'Društvo',
 }
 
-// ISR + statički render
-export const dynamic = 'force-static'
-export const revalidate = 300
-
-// Koliko kartica po strani
-const PAGE_SIZE = 24
-
-type Props = {
-  params: { category: Cat }
-  searchParams?: { page?: string }
-}
-
-export function generateStaticParams() {
-  return CAT_KEYS.map((category) => ({ category }))
-}
-
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const catKey = CAT_KEYS.includes(params.category) ? params.category : 'drustvo'
-  const label = LABELS[catKey] ?? 'Vesti'
+  const catKey = (CAT_KEYS as string[]).includes(params.category) ? params.category : 'drustvo'
+  const label = LABELS[catKey as Cat] ?? 'Vesti'
   return {
     title: `Vesti – ${label}`,
     description: `Najnovije vesti iz kategorije: ${label}.`,
@@ -47,15 +40,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function CatPage({ params, searchParams }: Props) {
-  const catKey: Cat = CAT_KEYS.includes(params.category) ? params.category : 'drustvo'
+  const catKey: Cat = (CAT_KEYS as string[]).includes(params.category) ? params.category : 'drustvo'
   const label = LABELS[catKey] ?? 'Vesti'
-  const page = Math.max(1, parseInt(String(searchParams?.page ?? '1'), 10) || 1)
+
+  const pageParam = String(searchParams?.page ?? '1')
+  const page = Math.max(1, parseInt(pageParam, 10) || 1)
 
   const [total, items] = await Promise.all([
     prisma.article.count({ where: { category: catKey } }),
     prisma.article.findMany({
       where: { category: catKey },
-      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       take: PAGE_SIZE,
       skip: (page - 1) * PAGE_SIZE,
       select: {
@@ -72,7 +67,7 @@ export default async function CatPage({ params, searchParams }: Props) {
   ])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const catCover = `/cats/${catKey}.webp` // fallback slika iz public/cats
+  const catCover = `/cats/${catKey}.webp`
 
   return (
     <main className="container" style={{ padding: '16px 0 32px' }}>
@@ -94,7 +89,6 @@ export default async function CatPage({ params, searchParams }: Props) {
               slug: a.slug,
               title: a.title,
               summary: a.summary,
-              // Fallback na kategorijsku sliku ako vest nema cover
               coverImage: a.coverImage ?? catCover,
               country: a.country,
               publishedAt: a.publishedAt,
@@ -106,48 +100,162 @@ export default async function CatPage({ params, searchParams }: Props) {
 
       {/* Paginacija */}
       {totalPages > 1 && (
-        <nav className="flex items-center justify-center gap-2 mt-6">
-          <PageLink category={catKey} page={page - 1} disabled={page <= 1}>
-            ← Prethodna
-          </PageLink>
-          <span className="text-sm text-neutral-600">
-            Strana {page} / {totalPages}
-          </span>
-          <PageLink category={catKey} page={page + 1} disabled={page >= totalPages}>
-            Sledeća →
-          </PageLink>
+        <nav
+          aria-label="Paginacija"
+          style={{
+            marginTop: 28,
+            display: 'grid',
+            gap: 10,
+            justifyItems: 'center',
+          }}
+        >
+          {/* Desktop/tablet */}
+          <div className="show-on-desktop" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <CircleLink
+              category={catKey}
+              page={page - 1}
+              disabled={page <= 1}
+              ariaLabel="Prethodna strana"
+              icon="left"
+            />
+            <span className="text-sm text-neutral-600">
+              Strana <b>{page}</b> / {totalPages}
+            </span>
+            <CircleLink
+              category={catKey}
+              page={page + 1}
+              disabled={page >= totalPages}
+              ariaLabel="Sledeća strana"
+              icon="right"
+            />
+          </div>
+
+          {/* Mobilni: strelice + input +  "trenutna/ukupno" */}
+          <form
+            className="show-on-mobile"
+            action={`/vesti/k/${encodeURIComponent(catKey)}`}
+            method="get"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              width: '100%',
+              justifyContent: 'center',
+            }}
+          >
+            <CircleLink
+              category={catKey}
+              page={page - 1}
+              disabled={page <= 1}
+              ariaLabel="Prethodna strana"
+              icon="left"
+            />
+
+            <input
+              type="number"
+              inputMode="numeric"
+              enterKeyHint="go"
+              name="page"
+              min={1}
+              max={totalPages}
+              placeholder={String(page)}
+              style={{
+                width: 84,
+                textAlign: 'center',
+                border: '1px solid var(--border)',
+                borderRadius: 999,
+                padding: '8px 10px',
+                background: 'var(--card)',
+                color: 'var(--fg)',
+              }}
+              aria-label="Idi na stranu"
+            />
+
+            {/* prikaz  "trenutna/ukupno"  */}
+            <span
+              style={{
+                fontSize: 13,
+                color: 'var(--muted)',
+                minWidth: 48,
+                textAlign: 'center',
+              }}
+              aria-hidden="true"
+            >
+              {page} / {totalPages}
+            </span>
+
+            {/* skriven submit da Enter radi bez posebnog dugmeta */}
+            <input type="submit" hidden />
+
+            <CircleLink
+              category={catKey}
+              page={page + 1}
+              disabled={page >= totalPages}
+              ariaLabel="Sledeća strana"
+              icon="right"
+            />
+          </form>
         </nav>
       )}
     </main>
   )
 }
 
-function PageLink({
+/** Jednostavan “pill” link sa chevron ikonama — bez event handlera i bez styled-jsx */
+function CircleLink({
   category,
   page,
   disabled,
-  children,
+  ariaLabel,
+  icon,
 }: {
   category: string
   page: number
   disabled?: boolean
-  children: React.ReactNode
+  ariaLabel: string
+  icon: 'left' | 'right'
 }) {
   const href = `/vesti/k/${encodeURIComponent(category)}${page > 1 ? `?page=${page}` : ''}`
-  if (disabled) {
+
+  const commonStyle: React.CSSProperties = {
+    width: 40,
+    height: 40,
+    border: '1px solid var(--border)',
+    borderRadius: 999,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'var(--card)',
+    color: 'var(--fg)',
+    textDecoration: 'none',
+  }
+
+  const iconSvg =
+    icon === 'left' ? (
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ) : (
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+
+  if (disabled || page < 1) {
     return (
-      <span className="px-3 py-1 text-sm text-neutral-400 border border-neutral-200 rounded-md">
-        {children}
+      <span
+        aria-disabled="true"
+        title={ariaLabel}
+        style={{ ...commonStyle, opacity: 0.45 }}
+      >
+        {iconSvg}
       </span>
     )
   }
+
   return (
-    <Link
-      href={href}
-      className="px-3 py-1 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50"
-      prefetch
-    >
-      {children}
+    <Link href={href} aria-label={ariaLabel} prefetch={false} style={commonStyle}>
+      {iconSvg}
     </Link>
   )
 }
