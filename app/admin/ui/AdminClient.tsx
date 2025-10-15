@@ -108,7 +108,7 @@ export default function AdminClient() {
     }
   }
 
-  // ====== BACKFILL (postojeći) ======
+  // ====== BACKFILL COVERS (postojeći) ======
   const [adminToken, setAdminToken] = useState('')
   const [bfLimit, setBfLimit] = useState(200)
   const [bfOnlyMissing, setBfOnlyMissing] = useState(true)
@@ -136,9 +136,10 @@ export default function AdminClient() {
     }
   }
 
+  // ====== BACKFILL CATEGORIES (legacy dugme) ======
   const [busyCat, setBusyCat] = useState(false)
   const [catLimit, setCatLimit] = useState(300)
-  const [catDry, setCatDry] = useState(false) // ostavljeno kao primer; koristiš runBackfillCategories ispod
+  const [catDry, setCatDry] = useState(false)
 
   async function runBackfillCategories() {
     setBusyCat(true)
@@ -158,9 +159,10 @@ export default function AdminClient() {
     }
   }
 
-  // ====== RECLASSIFY (novo) ======
-  const [rcToken, setRcToken] = useState('')     // ADMIN_TOKEN
+  // ====== RECLASSIFY (novo, koristi baš /api/admin/backfill-categories sa force=1) ======
+  const [rcToken, setRcToken] = useState('')     // BACKFILL_TOKEN (ako koristiš)
   const [rcBatch, setRcBatch] = useState(250)    // 50–1000
+  const [rcForce, setRcForce] = useState(true)   // <<<<<<<<<< KLJUČNO
   const [rcDry, setRcDry] = useState(false)
   const [rcAutoRevalidate, setRcAutoRevalidate] = useState(true)
   const [rcRunning, setRcRunning] = useState(false)
@@ -171,18 +173,15 @@ export default function AdminClient() {
   const rcCursorRef = useRef<string | null>(null)
 
   async function rcRunOnce() {
-    const res = await fetch('/api/admin/reclassify', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-admin-token': rcToken || '',
-      },
-      body: JSON.stringify({
-        cursor: rcCursorRef.current,
-        take: rcBatch,
-        dryRun: rcDry,
-      }),
-    })
+    const p = new URLSearchParams()
+    p.set('limit', String(rcBatch))
+    if (rcForce) p.set('force', '1')
+    if (rcDry) p.set('dryRun', '1')
+    if (rcToken) p.set('token', rcToken)
+    if (rcCursorRef.current) p.set('cursor', rcCursorRef.current)
+
+    const url = `/api/admin/backfill-categories?${p.toString()}`
+    const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) {
       const txt = await res.text().catch(() => `${res.status}`)
       throw new Error(`API error: ${txt}`)
@@ -190,12 +189,12 @@ export default function AdminClient() {
     const data = await res.json()
     if (!data?.ok) throw new Error('API response not ok')
 
-    rcCursorRef.current = data.done ? null : data.cursor ?? null
+    rcCursorRef.current = data.done ? null : (data.cursor ?? null)
     setRcUpdatedTotal(u => u + (data.updated || 0))
     setRcBatches(b => b + 1)
     setRcLastUpdated(data.updated || 0)
     setRcLog(l => [
-      `#${String(rcBatches + 1).padStart(3, '0')}  batch=${data.batch}  updated=${data.updated}  cursor=${data.cursor ?? '∅'}  done=${data.done ? '✓' : '…'}`,
+      `#${String(rcBatches + 1).padStart(3, '0')}  checked=${data.checked}  updated=${data.updated}  cursor=${data.cursor ?? '∅'}  done=${data.done ? '✓' : '…'}`,
       ...l,
     ])
     return !!data.done
@@ -205,14 +204,10 @@ export default function AdminClient() {
   async function runRevalidateAll() {
     setRvBusy(true)
     try {
-      // Ova tvoja ruta čita admin_session cookie, tako da token ne šaljemo ovde.
       const res = await fetch('/api/admin/revalidate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paths: CAT_PATHS,
-          // tags: ['articles'], // Dodaj ako koristiš tag-based caching
-        }),
+        body: JSON.stringify({ paths: CAT_PATHS /*, tags: ['articles']*/ }),
       })
       const data = await res.json()
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'revalidate_failed')
@@ -225,10 +220,6 @@ export default function AdminClient() {
   }
 
   async function rcRunAll() {
-    if (!rcToken) {
-      alert('Unesi ADMIN_TOKEN pa pokreni.')
-      return
-    }
     setRcRunning(true)
     setRcBatches(0)
     setRcUpdatedTotal(0)
@@ -239,7 +230,7 @@ export default function AdminClient() {
       for (let i = 0; i < 10000; i++) {
         const done = await rcRunOnce()
         if (done) break
-        await new Promise(r => setTimeout(r, 100))
+        await new Promise(r => setTimeout(r, 120))
       }
       if (rcAutoRevalidate) {
         await runRevalidateAll()
@@ -520,20 +511,20 @@ export default function AdminClient() {
             </section>
           )}
 
-          {/* RECLASSIFY (novo) */}
+          {/* RECLASSIFY */}
           {active === 'reclassify' && (
             <section style={{ display: 'grid', gap: 18 }}>
               <div style={styles.card}>
                 <h2 style={styles.h2}>Reclassify (prepakuj kategorije)</h2>
                 <p style={{ marginTop: 0, color: 'var(--muted)' }}>
-                  Na klik prolazi sve vesti u batch-evima i smešta u pravu kategoriju prema <code>lib/cats.ts</code>.
+                  Prolazi sve vesti u batch-evima i smešta ih u “pravu” kategoriju prema <code>lib/cats.ts</code>.
                 </p>
 
                 <div style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <input
                       type="password"
-                      placeholder="ADMIN_TOKEN (obavezno)"
+                      placeholder="BACKFILL_TOKEN (ako koristiš)"
                       value={rcToken}
                       onChange={e => setRcToken(e.target.value)}
                       style={{ ...styles.input, flex: 1, minWidth: 260 }}
@@ -548,6 +539,10 @@ export default function AdminClient() {
                       title="Veličina batch-a (50–1000)"
                     />
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input type="checkbox" checked={rcForce} onChange={e => setRcForce(e.target.checked)} />
+                      Force reclassify (prepiši postojeće ako su pogrešne)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <input type="checkbox" checked={rcDry} onChange={e => setRcDry(e.target.checked)} />
                       Dry run (ne upisuj)
                     </label>
@@ -561,7 +556,7 @@ export default function AdminClient() {
                     <button onClick={rcRunAll} disabled={rcRunning} style={styles.btnPrimary}>
                       {rcRunning ? 'Radim…' : 'Reclassify sve'}
                     </button>
-                    <button onClick={rcRunOnce} disabled={rcRunning || !rcToken} style={styles.btn}>
+                    <button onClick={rcRunOnce} disabled={rcRunning} style={styles.btn}>
                       Jedan batch
                     </button>
                     <button onClick={runRevalidateAll} disabled={rvBusy} style={styles.btn}>
