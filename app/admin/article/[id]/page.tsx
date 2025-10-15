@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { CAT_KEYS, CAT_LABELS } from '@/lib/cats'
+import CoverUpload from '@/app/admin/ui/CoverUpload' // [DODATO] upload komponenta
 
 type Article = {
   id: string
@@ -166,6 +167,23 @@ export default function AdminEditArticlePage() {
         {a.coverImage ? (
           <img src={`/api/img?url=${encodeURIComponent(a.coverImage)}`} alt="" style={{ maxWidth: 520, height: 'auto', borderRadius: 10, border: '1px solid #eee' }} />
         ) : null}
+
+        {/* [DODATO] Upload sa uređaja – jedna slika služi i kao cover i kao ogImage */}
+        <div style={{ display: 'grid', gap: 6 }}>
+          <label>Upload sa uređaja</label>
+          <CoverUpload
+            onUploaded={(u) => {
+              setA(prev => prev ? { ...prev, coverImage: u, ogImage: u } : prev)
+            }}
+          />
+          {a?.coverImage && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <img src={a.coverImage} alt="" style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb' }} />
+              <code style={{ fontSize: 12, color: '#64748b', wordBreak: 'break-all' }}>{a.coverImage}</code>
+            </div>
+          )}
+        </div>
+        {/* [KRAJ DODATKA] */}
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>

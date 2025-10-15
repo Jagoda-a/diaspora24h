@@ -8,7 +8,53 @@ import Footer from '@/components/Footer'
 import CookieBanner from '@/components/CookieBanner'
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://diaspora24h.com'),
+  // baza za apsolutne URL-ove u metadata
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://diaspora24h.com'),
+
+  // Kratko i jasno
+  title: {
+    default: 'Diaspora 24h — najvažnije vesti za naše ljude',
+    template: '%s — Diaspora 24h',
+  },
+  description: 'Diaspora 24h — najvažnije vesti za naše ljude',
+
+  openGraph: {
+    type: 'website',
+    siteName: 'Diaspora 24h',
+    url: '/',
+    title: 'Diaspora 24h — najvažnije vesti za naše ljude',
+    description: 'Diaspora 24h — najvažnije vesti za naše ljude',
+    images: [
+      {
+        url: '/og-home.jpg', // 1200x630 JPG sa belom pozadinom i celim logoom
+        width: 1200,
+        height: 630,
+        alt: 'Diaspora 24h',
+      },
+    ],
+    locale: 'sr_RS',
+  },
+
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Diaspora 24h — najvažnije vesti za naše ljude',
+    description: 'Diaspora 24h — najvažnije vesti za naše ljude',
+    images: ['/og-home.jpg'],
+  },
+
+  alternates: { canonical: '/' },
+
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-video-preview': -1,
+      'max-snippet': -1,
+    },
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -154,7 +200,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </footer>
 
-        {/* Tema toggle helper (čist JS, bez TS castova u stringu) */}
+        {/* Tema toggle helper */}
         <Script id="theme-listener" strategy="afterInteractive">
           {`
             window.addEventListener('theme:toggle', function () {

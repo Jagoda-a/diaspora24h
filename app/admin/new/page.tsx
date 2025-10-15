@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import CoverUpload from '@/app/admin/ui/CoverUpload' // [DODATO] komponenta za upload
 
 export default function AdminNewArticlePage() {
   const router = useRouter()
@@ -127,6 +128,28 @@ export default function AdminNewArticlePage() {
 
           <label>Cover slika (URL)</label>
           <input value={mCover} onChange={e => setMCover(e.target.value)} style={styles.input} />
+
+          {/* [DODATO] Upload sa uređaja – jedna slika služi i kao cover i kao glavna slika vesti */}
+          <div style={{ display: 'grid', gap: 6 }}>
+            <label>Upload sa uređaja</label>
+            <CoverUpload
+              onUploaded={(u) => {
+                setMCover(u) // postavi cover
+                // ubaci sliku u sadržaj samo ako već nema <img>
+                setMContent(prev => (prev.includes('<img ')
+                  ? prev
+                  : `<p><img src="${u}" alt="" style="max-width:100%;height:auto;border-radius:8px" /></p>\n${prev}`
+                ))
+              }}
+            />
+            {mCover && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <img src={mCover} alt="" style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid #e5e7eb' }} />
+                <code style={{ fontSize: 12, color: '#64748b', wordBreak: 'break-all' }}>{mCover}</code>
+              </div>
+            )}
+          </div>
+          {/* [KRAJ DODATKA] */}
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input value={mCategory} onChange={e => setMCategory(e.target.value)} placeholder="Kategorija" style={{ ...styles.input, width: 200 }} />

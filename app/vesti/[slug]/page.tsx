@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation';
 import { format } from 'date-fns';
 import { srLatn } from 'date-fns/locale';
 import { headers } from 'next/headers';
+import ShareBar from '../../../components/ShareBar';
 
 type Props = { params: { slug: string } };
 
@@ -100,8 +101,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const rawImg = a.ogImage?.trim() || a.coverImage || undefined;
   const ogImageAbs = rawImg
-    ? `${site}/api/imgx?url=${encodeURIComponent(rawImg)}&w=1200&h=630&fit=cover&pos=attention&format=webp&q=90`
-    : undefined;
+  ? `${site}/api/imgx?url=${encodeURIComponent(rawImg)}&w=1200&h=630&fit=cover&pos=attention&format=jpg&q=85`
+  : undefined;
+
+
 
   const publishedIso = (a.publishedAt ?? new Date()).toISOString();
   const allowIndex = !a.noindex;
@@ -337,6 +340,7 @@ export default async function ArticlePage({ params }: Props) {
         {/* HERO blok */}
         <div className="card-body">
           <div className="article-hero">
+            {/* LEVA kolona: slika + foto-kredit */}
             {heroSrc ? (
               <div className="media-wrap">
                 <img
@@ -345,15 +349,10 @@ export default async function ArticlePage({ params }: Props) {
                   loading="eager"
                   decoding="async"
                 />
-                {/* Foto izvor – čist tekst, bez linka, odmah ispod slike */}
                 {photoCreditText ? (
                   <div
                     className="photo-credit"
-                    style={{
-                      fontSize: 12,
-                      color: '#6b7280',
-                      marginTop: 6,
-                    }}
+                    style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}
                   >
                     {photoCreditText}
                   </div>
@@ -361,6 +360,7 @@ export default async function ArticlePage({ params }: Props) {
               </div>
             ) : null}
 
+            {/* DESNA kolona: naslov, dek, meta, pa SHARE */}
             <div className="text">
               <h1 className="title">{article.title}</h1>
               {dek ? <p className="dek">{dek}</p> : null}
@@ -368,25 +368,20 @@ export default async function ArticlePage({ params }: Props) {
                 {dt}
                 {article.language ? ` · ${String(article.language).toUpperCase()}` : ''}
               </div>
+
+              {/* SHARE — desno ispod opisa/meta */}
+              <div style={{ marginTop: 10 }}>
+                <ShareBar url={pageUrl} title={article.title} />
+              </div>
             </div>
           </div>
         </div>
 
         {/* Telo članka — FULL WIDTH */}
-        <div
-          className="card-body"
-          style={{
-            gridColumn: '1 / -1',
-          }}
-        >
+        <div className="card-body" style={{ gridColumn: '1 / -1' }}>
           <div
             className="prose prose-full"
-            style={{
-              maxWidth: 'none',
-              width: '100%',
-              lineHeight: 1.7,
-              fontSize: 18,
-            }}
+            style={{ maxWidth: 'none', width: '100%', lineHeight: 1.7, fontSize: 18 }}
             dangerouslySetInnerHTML={{ __html: toHtml(content) }}
           />
           {sourceAnchor ? <p style={{ marginTop: 16 }}>{sourceAnchor}</p> : null}
