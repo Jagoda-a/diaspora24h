@@ -73,6 +73,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="/rss.xml"
         />
 
+        {/* WebSite + SearchAction (site search boks u Google rezultatu) */}
+        <script
+          type="application/ld+json"
+          // target pretrage: /vesti?q=...
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'WebSite',
+              name: 'Diaspora 24h',
+              url: 'https://diaspora24h.com',
+              potentialAction: [{
+                '@type': 'SearchAction',
+                target: 'https://diaspora24h.com/vesti?q={search_term_string}',
+                'query-input': 'required name=search_term_string'
+              }]
+            }),
+          }}
+        />
+
         {/* No-flash theme init */}
         <Script id="theme-init" strategy="beforeInteractive">
           {`

@@ -101,10 +101,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const rawImg = a.ogImage?.trim() || a.coverImage || undefined;
   const ogImageAbs = rawImg
-  ? `${site}/api/imgx?url=${encodeURIComponent(rawImg)}&w=1200&h=630&fit=cover&pos=attention&format=jpg&q=85`
-  : undefined;
-
-
+    ? `${site}/api/imgx?url=${encodeURIComponent(rawImg)}&w=1200&h=630&fit=cover&pos=attention&format=jpg&q=85`
+    : undefined;
 
   const publishedIso = (a.publishedAt ?? new Date()).toISOString();
   const allowIndex = !a.noindex;
@@ -221,7 +219,7 @@ export default async function ArticlePage({ params }: Props) {
         </>
       );
 
-      // Tekstualni foto-kredit (ispod slike, bez linka)
+      // Tekstualni foto-kredit (koristimo ga ispod slike)
       photoCreditText = `Foto: ${brand}`;
     } catch {
       const safeText = article.sourceUrl.replace(/^https?:\/\//i, '');
@@ -233,7 +231,6 @@ export default async function ArticlePage({ params }: Props) {
           </a>
         </>
       );
-      // Ako URL nije validan za parsiranje, bar prikaži domen kao tekst
       photoCreditText = `Foto: ${safeText}`;
     }
   }
@@ -340,22 +337,24 @@ export default async function ArticlePage({ params }: Props) {
         {/* HERO blok */}
         <div className="card-body">
           <div className="article-hero">
-            {/* LEVA kolona: slika + foto-kredit */}
+            {/* LEVA kolona: slika; KREDIT ISPOD SLIKE kao običan paragraf */}
             {heroSrc ? (
-              <div className="media-wrap">
-                <img
-                  src={heroSrc}
-                  alt={article.title}
-                  loading="eager"
-                  decoding="async"
-                />
+              <div className="media-col">
+                <div className="media-wrap">
+                  <img
+                    src={heroSrc}
+                    alt={article.title}
+                    loading="eager"
+                    decoding="async"
+                  />
+                </div>
                 {photoCreditText ? (
-                  <div
+                  <p
                     className="photo-credit"
-                    style={{ fontSize: 12, color: '#6b7280', marginTop: 6 }}
+                    style={{ fontSize: 12, color: '#6b7280', margin: '6px 0 0 0' }}
                   >
                     {photoCreditText}
-                  </div>
+                  </p>
                 ) : null}
               </div>
             ) : null}
