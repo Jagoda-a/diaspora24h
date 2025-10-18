@@ -2,12 +2,11 @@
 import Parser from 'rss-parser'
 
 /* ------------------------------------------------
-   0) Safe-image allow list (za filtriranje u ingest-u)
+   0) Safe-image allow list (za filt/validaciju)
 ------------------------------------------------- */
 
-// Domeni sa kojih je bezbedno posluživati cover fotke
 export const SAFE_IMAGE_HOSTS = new Set<string>([
-  // CC/PD
+  // CC/PD (Wikimedia)
   'upload.wikimedia.org',
   'commons.wikimedia.org',
 
@@ -19,20 +18,17 @@ export const SAFE_IMAGE_HOSTS = new Set<string>([
   'cdn.pixabay.com',
   'pixabay.com',
 
-  // Tvoj CDN (po potrebi promeni/dodaj)
+  // Tvoj CDN (po potrebi dodaj/menjaj)
   'cdn.diaspora24h.com',
 ])
 
 export function isSafeImageHost(u?: string | null) {
   if (!u) return false
-  try {
-    const h = new URL(u).hostname
-    return SAFE_IMAGE_HOSTS.has(h)
-  } catch { return false }
+  try { return SAFE_IMAGE_HOSTS.has(new URL(u).hostname) } catch { return false }
 }
 
 /* ------------------------------------------------
-   1) Tipovi kompatibilni sa postojećim kodom
+   1) Tipovi (kompatibilno sa postojećim kodom)
 ------------------------------------------------- */
 
 export type RSItem = {
@@ -52,18 +48,18 @@ export type FeedWithItems = {
 }
 
 /* ------------------------------------------------
-   2) Novi, bogatiji tip za ingest (koristi ga API)
+   2) Bogatiji tip (ako ti zatreba u ingest-u)
 ------------------------------------------------- */
 
 export type FeedItem = {
   title: string
   url: string                 // permalink na original
-  sourceName: string          // npr. "N1", "BBC", "DW"
+  sourceName: string
   publishedAt?: string | null
   summary?: string | null
   contentHtml?: string | null
-  plainText: string           // očišćen tekst (HTML -> text)
-  coverImage?: string | null  // apsolutni URL (ako uspemo da nađemo)
+  plainText: string
+  coverImage?: string | null  // rezultat iz open-source pretrage
   language?: string | null
   country?: string | null
   categoryGuess?: string | null
@@ -100,7 +96,7 @@ export const RS_SOURCES_RS: string[] = [
   'https://pcpress.rs/feed/',
   'https://startit.rs/feed/',
 
-  // Hronika / Vesti (tabloidi — stabilni RSS endpointi)
+  // Hronika / Vesti
   'https://www.kurir.rs/rss/vesti',
   'https://www.kurir.rs/rss/hronika',
 ]
@@ -112,7 +108,7 @@ export const RS_SOURCES_DE: string[] = [
 ]
 
 /* ------------------------------------------------
-   4) Parser i HTTP helpers
+   4) Parser i osnovni HTTP helpers
 ------------------------------------------------- */
 
 const parser = new Parser({
@@ -131,22 +127,9 @@ function sanitizeAbsoluteUrl(url?: string | null, base?: string): string | null 
     if (!/^https?:$/.test(u.protocol)) return null
     return u.toString()
   } catch {
-    try {
-      if (base) return new URL(url, base).toString()
-    } catch {}
+    try { if (base) return new URL(url, base).toString() } catch {}
     return null
   }
-}
-
-function isImagePath(pathname: string) {
-  return /\.(png|jpe?g|webp|gif|avif)$/i.test(pathname)
-}
-
-function extractFirstImg(html?: string | null, base?: string): string | null {
-  if (!html) return null
-  const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
-  if (m) return sanitizeAbsoluteUrl(m[1], base)
-  return null
 }
 
 async function fetchTextSafe(url: string): Promise<string | null> {
@@ -167,43 +150,7 @@ async function fetchTextSafe(url: string): Promise<string | null> {
   }
 }
 
-function extractMetaImage(html: string, base?: string): string | null {
-  // og:image / twitter:image / itemprop="image"
-  const metas = [
-    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-    /<meta[^>]+name=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
-    /<meta[^>]+itemprop=["']image["'][^>]+content=["']([^"']+)["']/i,
-  ]
-  for (const rx of metas) {
-    const m = html.match(rx)
-    if (m && m[1]) {
-      const abs = sanitizeAbsoluteUrl(m[1], base)
-      if (abs) return abs
-    }
-  }
-  return null
-}
-
-async function resolveCoverFromPage(articleUrl: string): Promise<string | null> {
-  const html = await fetchTextSafe(articleUrl)
-  if (!html) return null
-  const base = (() => {
-    try {
-      return new URL(articleUrl).origin
-    } catch {
-      return undefined
-    }
-  })()
-  // 1) og:image / twitter:image
-  const og = extractMetaImage(html, base)
-  if (og) return og
-  // 2) prvi <img>
-  const img = extractFirstImg(html, base)
-  return img
-}
-
-// kroz /api/img proxy da izbegnemo hotlink/CORS blokade
+// kroz /api/img proxy da izbegnemo hotlink/CORS blokade (ako koristiš)
 export function asProxiedImage(url?: string | null) {
   if (!url) return null
   return `/api/img?url=${encodeURIComponent(url)}`
@@ -228,9 +175,7 @@ function stripHtml(html?: string | null): string {
 function domainToName(u: string): string {
   try {
     const { hostname } = new URL(u)
-    const h = hostname
-      .replace(/^www\./, '')
-      .replace(/^m\./, '')
+    const h = hostname.replace(/^www\./, '').replace(/^m\./, '')
     const base = h.split('.')[0] || h
     return base.charAt(0).toUpperCase() + base.slice(1)
   } catch {
@@ -285,22 +230,14 @@ export async function fetchFeeds(urls: string[]): Promise<FeedWithItems[]> {
         const contentSnippet =
           (it.contentSnippet ?? it.summary ?? '').toString() || undefined
 
-        // enclosure (slika/video)
-        let enclosure: { url?: string; type?: string } | undefined
-        if (it.enclosure?.url) {
-          enclosure = {
-            url: sanitizeAbsoluteUrl(it.enclosure.url, link) || undefined,
-            type: it.enclosure.type,
-          }
-        }
-
         return {
           title: rawTitle,
           link,
           contentSnippet,
           isoDate: it.isoDate,
           pubDate: it.pubDate,
-          enclosure,
+          // enclosure/og/img iz RSS-a IGNORIŠEMO za slike (ne koristimo više)
+          enclosure: undefined,
           content,
           contentHtml,
         }
@@ -316,41 +253,236 @@ export async function fetchFeeds(urls: string[]): Promise<FeedWithItems[]> {
 }
 
 /* ------------------------------------------------
-   8) Heuristika za cover sliku (kompat)
+   8) Pametna izgradnja upita za slike (iz naslova i teksta)
 ------------------------------------------------- */
 
-export async function resolveBestCover(item: RSItem): Promise<string | null> {
-  const base = (() => {
-    try { return new URL(item.link).origin } catch { return undefined }
-  })()
+function cleanQuery(s: string): string {
+  return (s || '').replace(/[„“"”'’]+/g, '').replace(/\s+/g, ' ').trim()
+}
 
-  // 1) enclosure sa image mimetype ili image ekstenzijom
-  if (item.enclosure?.url) {
+function extractCapitalPhrases(text: string, cap = 6): string[] {
+  const words = (text || '').split(/\s+/)
+  const phrases: string[] = []
+  let buf: string[] = []
+  for (const w of words) {
+    const ww = w.replace(/^[("'\-]+|[)"'\-.,;:!?]+$/g, '')
+    const isCap = /^[A-ZŠĐČĆŽ]/.test(ww)
+    if (isCap && ww.length > 1) buf.push(ww)
+    else {
+      if (buf.length) { phrases.push(buf.join(' ')); buf = [] }
+    }
+  }
+  if (buf.length) phrases.push(buf.join(' '))
+  const stop = new Set(['U','Na','Sa','O','I','Za','Do','Od','Po','Kod'])
+  return phrases.map(cleanQuery).filter(p => p && p.length >= 3 && !stop.has(p)).slice(0, cap)
+}
+
+const STOPWORDS = new Set([
+  'je','u','na','i','da','se','su','za','od','do','po','o','kod','sa','bez','ali','dok','jer','kao',
+  'kroz','pre','posle','bi','će','ne','nije','jesu','ili','te','ta','to','ti','odnosno','među','više',
+  'manje','protiv','zbog','oko','s','uz','preko','ovu','ove','ovaj','ovo','takođe','koji','koja','koje',
+  'što','nije','biti','bila','bilo','bili','bile','smo','ste','sam','si','će','ćeš','ćemo','ćete',
+  'u','srbiji','srbije','beogradu','beograd'
+])
+function topKeywordsFromText(text: string, max = 6): string[] {
+  const freq = new Map<string, number>()
+  const words = (text || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+
+  for (const w of words) {
+    if (w.length < 4) continue
+    if (STOPWORDS.has(w)) continue
+    if (/^\d+$/.test(w)) continue
+    freq.set(w, (freq.get(w) || 0) + 1)
+  }
+
+  return [...freq.entries()]
+    .sort((a,b) => b[1]-a[1])
+    .slice(0, max)
+    .map(([w]) => w)
+}
+
+export function makeImageQueriesFromNews(title: string, plainText?: string): string[] {
+  const baseTitle = cleanQuery(title)
+  const baseText  = cleanQuery((plainText || '').slice(0, 1000))
+
+  const capsTitle = extractCapitalPhrases(baseTitle, 5)
+  const capsText  = extractCapitalPhrases(baseText, 5)
+  const keywords  = topKeywordsFromText(baseText, 6)
+
+  const boosters = ['portret', 'press', 'konferencija', 'zvanična fotografija', 'ilustracija']
+
+  const queries: string[] = []
+  for (const p of capsTitle) { queries.push(p); queries.push(`${p} ${boosters[0]}`) }
+  for (const p of capsText) { if (!queries.includes(p)) queries.push(p) }
+  for (const k of keywords) queries.push(k)
+  if (baseTitle) queries.push(baseTitle)
+
+  const uniq = Array.from(new Set(queries.map(q => q.trim()).filter(Boolean)))
+  return uniq.slice(0, 10)
+}
+
+/* ------------------------------------------------
+   9) Pretraga slika: Wikimedia (bez ključa) + RF servisi (opciono)
+------------------------------------------------- */
+
+// ENV ključevi za royalty-free servise (opciono)
+const UNSPLASH_KEY = process.env.UNSPLASH_KEY || ''
+const PEXELS_KEY   = process.env.PEXELS_KEY || ''
+const PIXABAY_KEY  = process.env.PIXABAY_KEY || ''
+
+export async function searchWikimediaImage(query: string): Promise<string | null> {
+  if (!query) return null
+  const endpoint = 'https://commons.wikimedia.org/w/api.php'
+  const params = new URLSearchParams({
+    action: 'query',
+    format: 'json',
+    origin: '*',
+    generator: 'search',
+    gsrlimit: '8',
+    gsrnamespace: '6', // File:
+    gsrsearch: query,
+    prop: 'imageinfo|pageimages',
+    iiprop: 'url|extmetadata',
+    iiurlwidth: '1600',
+    iiurlheight: '1200',
+    pithumbsize: '1200',
+  })
+
+  try {
+    const res = await fetch(`${endpoint}?${params.toString()}`, {
+      headers: {
+        'user-agent':
+          'Mozilla/5.0 (compatible; diaspora24h-bot/1.0; +https://diaspora24h.vercel.app)',
+        accept: 'application/json',
+      },
+      cache: 'no-store',
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const pages = data?.query?.pages
+    if (!pages) return null
+
+    const candidates: string[] = []
+    for (const k of Object.keys(pages)) {
+      const p = pages[k]
+      const ii = Array.isArray(p?.imageinfo) ? p.imageinfo[0] : null
+      if (ii?.thumburl) candidates.push(ii.thumburl)
+      if (ii?.url) candidates.push(ii.url)
+      const thumb = p?.thumbnail?.source
+      if (thumb) candidates.push(thumb)
+    }
+    const first = candidates.find(Boolean) || null
+    const url = first ? sanitizeAbsoluteUrl(first) : null
+    return url && isSafeImageHost(url) ? url : null
+  } catch {
+    return null
+  }
+}
+
+export async function searchRoyaltyFreeImage(query: string): Promise<string | null> {
+  if (!query) return null
+
+  // Unsplash
+  if (UNSPLASH_KEY) {
     try {
-      const abs = sanitizeAbsoluteUrl(item.enclosure.url, base)
-      if (abs) {
-        const type = (item.enclosure.type || '').toLowerCase()
-        const pn = new URL(abs).pathname
-        if (type.startsWith('image/') || isImagePath(pn)) {
-          return abs
-        }
+      const u = new URL('https://api.unsplash.com/search/photos')
+      u.searchParams.set('query', query)
+      u.searchParams.set('per_page', '3')
+      u.searchParams.set('content_filter', 'high')
+      const res = await fetch(u.toString(), {
+        headers: { Authorization: `Client-ID ${UNSPLASH_KEY}` },
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        const j = await res.json()
+        const url = j?.results?.[0]?.urls?.regular || j?.results?.[0]?.urls?.full
+        if (url && isSafeImageHost(url)) return url
       }
     } catch {}
   }
 
-  // 2) <img src> iz content/content:encoded
-  const fromHtml = extractFirstImg(item.contentHtml, base)
-  if (fromHtml) return fromHtml
+  // Pexels
+  if (PEXELS_KEY) {
+    try {
+      const u = new URL('https://api.pexels.com/v1/search')
+      u.searchParams.set('query', query)
+      u.searchParams.set('per_page', '3')
+      u.searchParams.set('orientation', 'landscape')
+      const res = await fetch(u.toString(), {
+        headers: { Authorization: PEXELS_KEY },
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        const j = await res.json()
+        const url = j?.photos?.[0]?.src?.large2x || j?.photos?.[0]?.src?.large
+        if (url && isSafeImageHost(url)) return url
+      }
+    } catch {}
+  }
 
-  // 3) og:image sa same stranice
-  const fromOg = await resolveCoverFromPage(item.link)
-  if (fromOg) return fromOg
+  // Pixabay
+  if (PIXABAY_KEY) {
+    try {
+      const u = new URL('https://pixabay.com/api/')
+      u.searchParams.set('key', PIXABAY_KEY)
+      u.searchParams.set('q', query)
+      u.searchParams.set('image_type', 'photo')
+      u.searchParams.set('order', 'popular')
+      u.searchParams.set('per_page', '3')
+      u.searchParams.set('safesearch', 'true')
+      const res = await fetch(u.toString(), { cache: 'no-store' })
+      if (res.ok) {
+        const j = await res.json()
+        const url = j?.hits?.[0]?.largeImageURL || j?.hits?.[0]?.webformatURL
+        if (url && isSafeImageHost(url)) return url
+      }
+    } catch {}
+  }
 
   return null
 }
 
 /* ------------------------------------------------
-   9) Novi helper: agreguj i obogati stavke (za ingest)
+   10) — KLJUČNO — Cover iz OPEN izvora (bez RSS-a)
+------------------------------------------------- */
+
+/**
+ * resolveBestCover:
+ *  - Ne koristi RSS enclosure / og:image iz izvora.
+ *  - Gradi upite iz naslova i plain teksta i traži:
+ *      1) Wikimedia Commons (CC/PD, bez ključa)
+ *      2) Unsplash / Pexels / Pixabay (ako su postavljeni API ključevi)
+ *  - Ako ništa ne nađe, vrati null (ingest koristi kategorijsku sliku)
+ */
+export async function resolveBestCover(item: RSItem): Promise<string | null> {
+  const title = (item.title || '').toString().trim()
+  const plain = stripHtml(item.contentHtml || item.contentSnippet || '')
+
+  const queries = makeImageQueriesFromNews(title, plain)
+
+  // 1) probaj Wikimedia za svaku varijantu
+  for (const q of queries) {
+    const url = await searchWikimediaImage(q)
+    if (url && isSafeImageHost(url)) return url
+  }
+
+  // 2) ako imaš ključeve, probaj royalty-free servise (Unsplash/Pexels/Pixabay)
+  for (const q of queries) {
+    const url = await searchRoyaltyFreeImage(q)
+    if (url && isSafeImageHost(url)) return url
+  }
+
+  // 3) ništa – ingest će postaviti kategorijsku sliku
+  return null
+}
+
+/* ------------------------------------------------
+   11) Pomoćni „collectFeedItems“ (ako želiš da ga koristiš)
 ------------------------------------------------- */
 
 function guessCategoryFromUrl(u: string): string | null {
@@ -366,12 +498,6 @@ function guessCategoryFromUrl(u: string): string | null {
   } catch { return null }
 }
 
-/**
- * collectFeedItems: vrati listu FeedItem spremnu za ingest.
- * - Izvlači sourceName iz entry.source.title ili domena
- * - Generiše plainText iz contentHtml/summary
- * - Pokušava da pronađe coverImage (enclosure -> <img> -> og:image)
- */
 export async function collectFeedItems(urls: string[]): Promise<FeedItem[]> {
   const packs = await fetchFeeds(urls)
   const out: FeedItem[] = []
@@ -385,11 +511,10 @@ export async function collectFeedItems(urls: string[]): Promise<FeedItem[]> {
       const summary = (it.contentSnippet || '').trim() || null
       const plainText = stripHtml(contentHtml || summary || '')
 
-      // Pokušaj cover-a (sirovi rezultat; FILTER radiš u ingest-u pomoću isSafeImageHost)
+      // NEW: umesto RSS slike, pokušaj open-source cover preko resolveBestCover
       let coverImage: string | null = null
       try { coverImage = await resolveBestCover(it) } catch {}
 
-      // Source name: iz rss <source> ili iz domena
       const sourceName = ((): string => {
         const s = (it as any)?.source?.title as string | undefined
         return (s && s.trim()) || domainToName(url)
@@ -403,13 +528,12 @@ export async function collectFeedItems(urls: string[]): Promise<FeedItem[]> {
         summary,
         contentHtml,
         plainText,
-        coverImage,
+        coverImage, // već filtrirano kroz whitelist
         language: null,
         country: null,
         categoryGuess: guessCategoryFromUrl(url),
       })
     }
   }
-
   return out
 }

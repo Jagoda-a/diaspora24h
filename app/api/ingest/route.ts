@@ -2,7 +2,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { slugify } from '@/lib/slug'
-import { fetchFeeds, RS_SOURCES_RS, resolveBestCover, isSafeImageHost } from '@/lib/rss'
+import {
+  fetchFeeds,
+  RS_SOURCES_RS,
+  isSafeImageHost,
+  makeImageQueriesFromNews,
+  searchWikimediaImage,
+  searchRoyaltyFreeImage,
+} from '@/lib/rss'
 import { aiRewrite, isLongEnough, makeTopicKey } from '@/lib/ai'
 import { classifyTitle } from '@/lib/cats'
 
@@ -22,8 +29,6 @@ type FlatItem = {
   contentHtml?: string
   isoDate?: string
   pubDate?: string
-  enclosureUrl?: string | null
-  coverUrl?: string | null
 }
 
 /* -------------------------
@@ -47,60 +52,12 @@ function pickFirst(arr: (string | undefined | null)[], maxLen = 6000) {
   return ''
 }
 
-function sanitizeAbsoluteUrl(url?: string | null, base?: string) {
-  if (!url) return null
-  try {
-    const u = base ? new URL(url, base) : new URL(url)
-    if (!/^https?:$/.test(u.protocol)) return null
-    return u.toString()
-  } catch {
-    try { if (base) return new URL(url, base).toString() } catch {}
-    return null
-  }
-}
-
-/** Kanonikalizuj link (origin + pathname, bez query/frag) */
 function canonicalizeLink(u?: string | null): string | null {
   if (!u) return null
   try {
     const x = new URL(u)
     return `${x.origin}${x.pathname}`
   } catch { return null }
-}
-
-/** NEMOJ zahtevati ekstenziju (.jpg); mnogi CDN-ovi je nemaju u path-u */
-function isImagePathLike(urlStr: string) {
-  try {
-    const u = new URL(urlStr)
-    return /^https?:$/.test(u.protocol) && !!u.hostname
-  } catch { return false }
-}
-
-/** REŠI relativne <img src> u odnosu na URL članka */
-function extractImageUrl(html?: string | null, baseForRel?: string) {
-  if (!html) return null
-  const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
-  if (!m) return null
-  const raw = m[1]
-  const abs = sanitizeAbsoluteUrl(raw, baseForRel || undefined)
-  return abs && isImagePathLike(abs) ? abs : null
-}
-
-/** Prvi “verovatan” image URL; ne odbacuj zbog ekstenzije */
-function firstValidCover(urls: (string | null | undefined)[]) {
-  for (const u of urls) {
-    const abs = sanitizeAbsoluteUrl(u || undefined)
-    if (abs && isImagePathLike(abs)) return abs
-  }
-  return null
-}
-
-function normTitleKey(s?: string | null) {
-  return (s || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/["'«»„”“]/g, '')
-    .trim()
 }
 
 async function findUniqueSlug(base: string) {
@@ -114,7 +71,7 @@ async function findUniqueSlug(base: string) {
   }
 }
 
-// ✅ FIX: izbacio sam parametar `country`, jer ga aiRewrite ne prima
+// ✅ bez parametra `country` (aiRewrite ga ne prima)
 async function summarizeFromItem(item: FlatItem) {
   const plainText = pickFirst([stripHtml(item.contentHtml) || item.contentSnippet || ''], 6000)
   const ai = await aiRewrite({
@@ -157,19 +114,17 @@ function trimTo(s: string, n: number) {
 }
 
 function siteOrigin() {
-  // PUBLIC_SITE_ORIGIN npr. https://diaspora24h.com
   return (process.env.PUBLIC_SITE_ORIGIN || 'https://diaspora24h.vercel.app').replace(/\/$/, '')
 }
 
 function buildSeoTitle(title: string, siteName = 'Diaspora24h') {
-  // primer: "Naslov vesti — Diaspora24h"
   const base = title?.trim() || 'Vest'
   return trimTo(`${base} — ${siteName}`, 60)
 }
 
 function buildSeoDescription(summary?: string, fallbackFromContent?: string) {
   const txt = (summary || fallbackFromContent || '').trim()
-  return trimTo(txt, 160) // ~160 znakova
+  return trimTo(txt, 160)
 }
 
 function buildCanonical(slug: string) {
@@ -247,16 +202,6 @@ async function gatherItems(limit: number): Promise<FlatItem[][]> {
       const contentHtml: string | undefined =
         it['content:encoded'] || it.contentHtml || it.content || undefined
 
-      let fromEnclosure: string | null = null
-      if (it.enclosure?.url) {
-        const type = String(it.enclosure.type || '').toLowerCase()
-        const url = sanitizeAbsoluteUrl(it.enclosure.url, it.link)
-        if (url && (type.startsWith('image/') || isImagePathLike(url))) {
-          fromEnclosure = url
-        }
-      }
-      const fromHtml = extractImageUrl(contentHtml || it.contentSnippet, it.link)
-
       const linkCanon = canonicalizeLink(it.link)
 
       selected.push({
@@ -268,8 +213,6 @@ async function gatherItems(limit: number): Promise<FlatItem[][]> {
         contentHtml,
         isoDate: it.isoDate,
         pubDate: it.pubDate,
-        enclosureUrl: fromEnclosure,
-        coverUrl: firstValidCover([fromHtml, fromEnclosure]),
       })
       perSourceCount.set(host, used + 1)
       picked++
@@ -298,16 +241,6 @@ async function gatherItems(limit: number): Promise<FlatItem[][]> {
           const contentHtml: string | undefined =
             it['content:encoded'] || it.contentHtml || it.content || undefined
 
-          let fromEnclosure: string | null = null
-          if (it.enclosure?.url) {
-            const type = String(it.enclosure.type || '').toLowerCase()
-            const url = sanitizeAbsoluteUrl(it.enclosure.url, it.link)
-            if (url && (type.startsWith('image/') || isImagePathLike(url))) {
-              fromEnclosure = url
-            }
-          }
-          const fromHtml = extractImageUrl(contentHtml || it.contentSnippet, it.link)
-
           selected.push({
             sourceName: p.host,
             title,
@@ -317,8 +250,6 @@ async function gatherItems(limit: number): Promise<FlatItem[][]> {
             contentHtml,
             isoDate: it.isoDate,
             pubDate: it.pubDate,
-            enclosureUrl: fromEnclosure,
-            coverUrl: firstValidCover([fromHtml, fromEnclosure]),
           })
           picked++
           changed = true
@@ -341,29 +272,35 @@ async function gatherItems(limit: number): Promise<FlatItem[][]> {
   return groups
 }
 
-async function resolveCoverHard(first: FlatItem, group: FlatItem[]): Promise<string | null> {
-  // 1) pokušaj iz feed-a
-  let cover = firstValidCover(group.map(i => i.coverUrl))
-  if (cover && isSafeImageHost(cover)) return cover
+/** Cover isključivo iz OPEN izvora:
+ *  1) napravi upite iz naslova+teksta
+ *  2) probaj Wikimedia Commons (bez ključa)
+ *  3) probaj Unsplash/Pexels/Pixabay (ako su ENV ključevi postavljeni)
+ */
+async function resolveCoverHard(first: FlatItem, _group: FlatItem[]): Promise<string | null> {
+  const plain = stripHtml(first.contentHtml) || first.contentSnippet || ''
+  const queries = makeImageQueriesFromNews(first.title, plain)
 
-  // 2) poslednja šansa: og:image ili prvi <img> sa stranice članka
-  try {
-    cover = await resolveBestCover({
-      title: first.title,
-      link: first.link,
-      contentSnippet: first.contentSnippet,
-      contentHtml: first.contentHtml,
-      enclosure: first.enclosureUrl ? { url: first.enclosureUrl, type: 'image/*' } : undefined,
-      isoDate: first.isoDate,
-      pubDate: first.pubDate,
-      content: first.contentHtml,
-    } as any)
-    if (cover && isImagePathLike(cover) && isSafeImageHost(cover)) return cover
-  } catch {}
+  // 1) Wikimedia
+  for (const q of queries) {
+    try {
+      const url = await searchWikimediaImage(q)
+      if (url && isSafeImageHost(url)) return url
+    } catch {}
+  }
+
+  // 2) Royalty-free (opciono)
+  for (const q of queries) {
+    try {
+      const url = await searchRoyaltyFreeImage(q)
+      if (url && isSafeImageHost(url)) return url
+    } catch {}
+  }
+
   return null
 }
 
-/** meka deduplikacija po naslovu (poslednja 3 dana) — koristi se za izvorni i AI naslov */
+/** meka deduplikacija po naslovu (poslednja 3 dana) */
 async function looksLikeRecentDuplicateByTitle(title: string) {
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
   const probe = (title || '').slice(0, 48)
@@ -395,12 +332,12 @@ async function runIngest(limit: number) {
       const first = group[0]
       const linkCanon = first.linkCanon || canonicalizeLink(first.link) || first.link
 
-      // 0) meka deduplikacija po izvornom naslovu (ako već postoji skoro identično)
+      // 0) meka deduplikacija po izvornom naslovu
       const recentDupe = await looksLikeRecentDuplicateByTitle(first.title || '')
       if (recentDupe) {
         const updates: Record<string, any> = {}
         if (!recentDupe.coverImage) {
-          let coverImageResolved = await resolveCoverHard(first, group)
+          const coverImageResolved = await resolveCoverHard(first, group)
           const catForFallback = recentDupe.category || 'drustvo'
           const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
@@ -409,7 +346,7 @@ async function runIngest(limit: number) {
           const ai = await summarizeFromItem(first)
           if (!recentDupe.summary && ai.summary) updates.summary = ai.summary
           if (!recentDupe.content && isLongEnough(ai.content)) updates.content = ai.content
-          // dopuni SEO ako fali
+          // SEO dopune
           if (!recentDupe.seoTitle && ai.title) updates.seoTitle = buildSeoTitle(ai.title)
           if (!recentDupe.seoDescription) updates.seoDescription = buildSeoDescription(ai.summary, ai.content)
           if (!recentDupe.ogImage) updates.ogImage = pickOgImage(updates.coverImage || recentDupe.coverImage, null)
@@ -423,14 +360,14 @@ async function runIngest(limit: number) {
         return
       }
 
-      // 1) tvrda deduplikacija po linku (kanonski ili originalni)
+      // 1) tvrda deduplikacija po linku
       const byLink = await prisma.article.findFirst({
         where: { OR: [{ sourceUrl: first.link }, { sourceUrl: linkCanon }] }
       })
       if (byLink) {
         const updates: Record<string, any> = {}
         if (!byLink.coverImage) {
-          let coverImageResolved = await resolveCoverHard(first, group)
+          const coverImageResolved = await resolveCoverHard(first, group)
           const catForFallback = byLink.category || 'drustvo'
           const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
@@ -439,7 +376,7 @@ async function runIngest(limit: number) {
           const ai = await summarizeFromItem(first)
           if (!byLink.summary && ai.summary) updates.summary = ai.summary
           if (!byLink.content && isLongEnough(ai.content)) updates.content = ai.content
-          // dopuni SEO ako fali
+          // SEO dopune
           if (!byLink.seoTitle && ai.title) updates.seoTitle = buildSeoTitle(ai.title)
           if (!byLink.seoDescription) updates.seoDescription = buildSeoDescription(ai.summary, ai.content)
           if (!byLink.ogImage) updates.ogImage = pickOgImage(updates.coverImage || byLink.coverImage, null)
@@ -459,19 +396,19 @@ async function runIngest(limit: number) {
       // 2a) preskoči ako je sadržaj prekratak (< 500 karaktera)
       if (!isLongEnough(ai.content)) return
 
-      // 2b) meka deduplikacija po AI naslovu (isti raspon od 3 dana)
+      // 2b) meka deduplikacija po AI naslovu
       const aiRecentDupe = await looksLikeRecentDuplicateByTitle(ai.title)
       if (aiRecentDupe) {
         const updates: Record<string, any> = {}
         if (!aiRecentDupe.coverImage) {
-          let coverImageResolved = await resolveCoverHard(first, group)
+          const coverImageResolved = await resolveCoverHard(first, group)
           const catForFallback = aiRecentDupe.category || 'drustvo'
           const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
         }
         if (!aiRecentDupe.summary && ai.summary) updates.summary = ai.summary
         if (!aiRecentDupe.content && isLongEnough(ai.content)) updates.content = ai.content
-        // dopuni SEO ako fali
+        // SEO dopune
         if (!aiRecentDupe.seoTitle && ai.title) updates.seoTitle = buildSeoTitle(ai.title)
         if (!aiRecentDupe.seoDescription) updates.seoDescription = buildSeoDescription(ai.summary, ai.content)
         if (!aiRecentDupe.ogImage) updates.ogImage = pickOgImage(updates.coverImage || aiRecentDupe.coverImage, null)
@@ -491,8 +428,8 @@ async function runIngest(limit: number) {
       // 3) Novi članak
       const category = classifyTitle(ai.title, ai.summary || ai.content)
 
-      // Pokušaj da nađeš cover; ako nema – kategorijski fallback
-      let coverImageResolved = await resolveCoverHard(first, group)
+      // Cover iz OPEN izvora; fallback na kategorijsku
+      const coverImageResolved = await resolveCoverHard(first, group)
       const coverImage = coverImageResolved || `/cats/${category}.webp`
 
       const publishedAt =
@@ -501,7 +438,7 @@ async function runIngest(limit: number) {
 
       const uniqueSlug = await findUniqueSlug(ai.title)
 
-      // SEO vrednosti prilikom kreiranja
+      // SEO vrednosti
       const seoTitle = buildSeoTitle(ai.title)
       const seoDescription = buildSeoDescription(ai.summary, ai.content)
       const ogImage = pickOgImage(coverImage, null)
