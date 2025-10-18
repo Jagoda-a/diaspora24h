@@ -25,20 +25,18 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData()
     const file = form.get('file') as File | null
-    if (!file) {
-      return NextResponse.json({ ok: false, error: 'file_missing' }, { status: 400 })
-    }
+    if (!file) return NextResponse.json({ ok: false, error: 'file_missing' }, { status: 400 })
     if (!file.type.startsWith('image/')) {
       return NextResponse.json({ ok: false, error: 'not_image' }, { status: 400 })
     }
 
     const key = `covers/${Date.now()}-${Math.random().toString(36).slice(2)}-${file.name}`
 
-    const blob = await put(key, file.stream(), {
+    // token nije potreban ako postoji BLOB_READ_WRITE_TOKEN u env-u
+    const blob = await put(key, file, {
       access: 'public',
       contentType: file.type,
       addRandomSuffix: false,
-      token: process.env.BLOB_READ_WRITE_TOKEN,
     })
 
     return NextResponse.json({ ok: true, url: blob.url })
