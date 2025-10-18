@@ -5,6 +5,10 @@ const AI_PROVIDER = process.env.AI_PROVIDER ?? 'openai' // 'openai' | 'none'
 const AI_MODEL = process.env.AI_MODEL ?? 'gpt-4o-mini'
 const OPENAI_KEY = process.env.OPENAI_API_KEY
 
+// Podesivi pragovi sličnosti (stroži = manji brojevi)
+const TITLE_SIM_MAX = Number(process.env.AI_TITLE_SIM_MAX ?? 0.33) // ranije 0.50
+const BODY_SIM_MAX  = Number(process.env.AI_BODY_SIM_MAX  ?? 0.22) // ranije 0.35
+
 // Pismo/jezik
 const TARGET_SCRIPT: 'sr-Latn' = 'sr-Latn'
 
@@ -328,8 +332,8 @@ TEKST (plain):
 
   // Stroži pragovi sličnosti radi originalnosti
   const tooSimilar =
-    jaccard(srcTitle, out!.title) > 0.50 ||
-    jaccard(srcPlain, out!.content) > 0.35
+    jaccard(srcTitle, out!.title) > TITLE_SIM_MAX ||
+    jaccard(srcPlain, out!.content) > BODY_SIM_MAX
 
   if (tooSimilar) {
     const second = await pass(true)
@@ -434,7 +438,6 @@ export function makeTopicKey(title?: string, body?: string) {
 }
 
 // Kompat: neki delovi projekta očekuju "dugoću" po karakterima.
-// Ostavio sam konzervativnih 500 karaktera (ne menja tok rada).
 export function isLongEnough(s?: string | null) {
   return (String(s || '').replace(/\s+/g, ' ').trim().length) >= 500
 }
