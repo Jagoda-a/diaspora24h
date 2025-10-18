@@ -1,6 +1,10 @@
 // lib/rss.ts
 import Parser from 'rss-parser'
 
+/* ------------------------------------------------
+   1) Tipovi kompatibilni sa postojećim kodom
+------------------------------------------------- */
+
 export type RSItem = {
   title: string
   link: string
@@ -16,6 +20,28 @@ export type FeedWithItems = {
   url: string
   items: RSItem[]
 }
+
+/* ------------------------------------------------
+   2) Novi, bogatiji tip za ingest (koristi ga API)
+------------------------------------------------- */
+
+export type FeedItem = {
+  title: string
+  url: string                 // permalink na original
+  sourceName: string          // npr. "N1", "BBC", "DW"
+  publishedAt?: string | null
+  summary?: string | null
+  contentHtml?: string | null
+  plainText: string           // očišćen tekst (HTML -> text)
+  coverImage?: string | null  // apsolutni URL (ako uspemo da nađemo)
+  language?: string | null
+  country?: string | null
+  categoryGuess?: string | null
+}
+
+/* ------------------------------------------------
+   3) Izvori feedova
+------------------------------------------------- */
 
 export const RS_SOURCES_RS: string[] = [
   // Opšte / Politika
@@ -49,12 +75,15 @@ export const RS_SOURCES_RS: string[] = [
   'https://www.kurir.rs/rss/hronika',
 ]
 
-
 // Dodatni feedovi (DE tržište na srpskom)
 export const RS_SOURCES_DE: string[] = [
   'https://www.dw.com/rs/rss',
   'https://www.dw.com/sr-Latn/rss',
 ]
+
+/* ------------------------------------------------
+   4) Parser i HTTP helpers
+------------------------------------------------- */
 
 const parser = new Parser({
   timeout: 15000,
@@ -150,20 +179,47 @@ export function asProxiedImage(url?: string | null) {
   return `/api/img?url=${encodeURIComponent(url)}`
 }
 
-/* -------------------------
-   Dodatne male pomoćne
-------------------------- */
+/* ------------------------------------------------
+   5) Tekst helpers (HTML -> plain, ime izvora)
+------------------------------------------------- */
 
-// Skidanje uobičajenih tracking query parametara (utm_*, fbclid, gclid...)
+function stripHtml(html?: string | null): string {
+  const h = (html || '').toString()
+  if (!h) return ''
+  return h
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function domainToName(u: string): string {
+  try {
+    const { hostname } = new URL(u)
+    const h = hostname
+      .replace(/^www\./, '')
+      .replace(/^m\./, '')
+    const base = h.split('.')[0] || h
+    return base.charAt(0).toUpperCase() + base.slice(1)
+  } catch {
+    return 'izvor'
+  }
+}
+
+/* ------------------------------------------------
+   6) URL normalizacija (tracking parametri)
+------------------------------------------------- */
+
 function stripTrackingParams(u: string): string {
   try {
     const url = new URL(u)
     const bad = [
-      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-      'fbclid', 'gclid', 'igshid', 'mc_cid', 'mc_eid'
+      'utm_source','utm_medium','utm_campaign','utm_term','utm_content',
+      'fbclid','gclid','igshid','mc_cid','mc_eid'
     ]
     bad.forEach(k => url.searchParams.delete(k))
-    // Ako ništa nije ostalo u query-ju, vrati čist link bez upitnika
     url.search = url.searchParams.toString()
     return url.toString()
   } catch {
@@ -171,15 +227,14 @@ function stripTrackingParams(u: string): string {
   }
 }
 
-// Normalizacija linka stavke (apsolutni + strip tracking)
 function normalizeItemLink(link: string): string {
   const abs = sanitizeAbsoluteUrl(link) || link
   return stripTrackingParams(abs)
 }
 
-/* -------------------------
-   Fetch svih feedova
-------------------------- */
+/* ------------------------------------------------
+   7) Fetch svih feedova (kompat)
+------------------------------------------------- */
 
 export async function fetchFeeds(urls: string[]): Promise<FeedWithItems[]> {
   const results: FeedWithItems[] = []
@@ -230,10 +285,11 @@ export async function fetchFeeds(urls: string[]): Promise<FeedWithItems[]> {
   return results
 }
 
-// Heuristika za cover sliku (enclosure -> content <img> -> og:image stranice)
-export async function resolveBestCover(
-  item: RSItem
-): Promise<string | null> {
+/* ------------------------------------------------
+   8) Heuristika za cover sliku (kompat)
+------------------------------------------------- */
+
+export async function resolveBestCover(item: RSItem): Promise<string | null> {
   const base = (() => {
     try { return new URL(item.link).origin } catch { return undefined }
   })()
@@ -261,4 +317,69 @@ export async function resolveBestCover(
   if (fromOg) return fromOg
 
   return null
+}
+
+/* ------------------------------------------------
+   9) Novi helper: agreguj i obogati stavke (za ingest)
+------------------------------------------------- */
+
+function guessCategoryFromUrl(u: string): string | null {
+  try {
+    const url = new URL(u)
+    const p = url.pathname.toLowerCase()
+    if (p.includes('/sport')) return 'sport'
+    if (p.includes('/biznis') || p.includes('/ekonom')) return 'ekonomija'
+    if (p.includes('/kultura')) return 'kultura'
+    if (p.includes('/hronika')) return 'hronika'
+    if (p.includes('/tech') || p.includes('/it') || p.includes('/tehnolog')) return 'tehnologija'
+    return null
+  } catch { return null }
+}
+
+/**
+ * collectFeedItems: vrati listu FeedItem spremnu za ingest.
+ * - Izvlači sourceName iz entry.source.title ili domena
+ * - Generiše plainText iz contentHtml/summary
+ * - Pokušava da pronađe coverImage (enclosure -> <img> -> og:image)
+ */
+export async function collectFeedItems(urls: string[]): Promise<FeedItem[]> {
+  const packs = await fetchFeeds(urls)
+  const out: FeedItem[] = []
+
+  for (const pack of packs) {
+    for (const it of pack.items) {
+      const url = normalizeItemLink(it.link || '')
+      if (!url) continue
+
+      const contentHtml = it.contentHtml ?? it.content ?? null
+      const summary = (it.contentSnippet || '').trim() || null
+      const plainText = stripHtml(contentHtml || summary || '')
+
+      // Pokušaj cover-a
+      let coverImage: string | null = null
+      try { coverImage = await resolveBestCover(it) } catch {}
+
+      // Source name: iz rss <source> ili iz domena
+      const sourceName = ((): string => {
+        const s = (it as any)?.source?.title as string | undefined
+        return (s && s.trim()) || domainToName(url)
+      })()
+
+      out.push({
+        title: (it.title || '').toString().trim() || '(bez naslova)',
+        url,
+        sourceName,
+        publishedAt: it.isoDate || it.pubDate || null,
+        summary,
+        contentHtml,
+        plainText,
+        coverImage,
+        language: null,
+        country: null,
+        categoryGuess: guessCategoryFromUrl(url),
+      })
+    }
+  }
+
+  return out
 }

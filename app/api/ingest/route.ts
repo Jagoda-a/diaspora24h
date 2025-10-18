@@ -114,13 +114,13 @@ async function findUniqueSlug(base: string) {
   }
 }
 
+// ✅ FIX: izbacio sam parametar `country`, jer ga aiRewrite ne prima
 async function summarizeFromItem(item: FlatItem) {
   const plainText = pickFirst([stripHtml(item.contentHtml) || item.contentSnippet || ''], 6000)
   const ai = await aiRewrite({
     sourceTitle: item.title || 'Vest',
     plainText,
     language: 'sr',
-    country: 'rs',
     sourceName: item.sourceName || 'izvor',
   })
   return ai
@@ -489,7 +489,6 @@ async function runIngest(limit: number) {
       const topicKey = makeTopicKey(ai.title, ai.content)
 
       // 3) Novi članak
-      // *** BITNO: klasifikacija po naslovu + summary/content (ne po linku) ***
       const category = classifyTitle(ai.title, ai.summary || ai.content)
 
       // Pokušaj da nađeš cover; ako nema – kategorijski fallback
