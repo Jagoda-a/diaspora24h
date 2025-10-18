@@ -1,8 +1,8 @@
-name: Ingest every 12 minutes
+name: Ingest every 45 minutes
 
 on:
   schedule:
-    - cron: "*/12 * * * *"   # svakih 12 min (UTC)
+    - cron: "0,45 * * * *"   # na svaku punu uru i u :45 (UTC)
   workflow_dispatch:          # ručno pokretanje iz Actions taba
 
 jobs:
