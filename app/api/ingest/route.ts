@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { slugify } from '@/lib/slug'
-import { fetchFeeds, RS_SOURCES_RS, resolveBestCover } from '@/lib/rss'
+import { fetchFeeds, RS_SOURCES_RS, resolveBestCover, isSafeImageHost } from '@/lib/rss'
 import { aiRewrite, isLongEnough, makeTopicKey } from '@/lib/ai'
 import { classifyTitle } from '@/lib/cats'
 
@@ -344,7 +344,7 @@ async function gatherItems(limit: number): Promise<FlatItem[][]> {
 async function resolveCoverHard(first: FlatItem, group: FlatItem[]): Promise<string | null> {
   // 1) pokušaj iz feed-a
   let cover = firstValidCover(group.map(i => i.coverUrl))
-  if (cover) return cover
+  if (cover && isSafeImageHost(cover)) return cover
 
   // 2) poslednja šansa: og:image ili prvi <img> sa stranice članka
   try {
@@ -358,7 +358,7 @@ async function resolveCoverHard(first: FlatItem, group: FlatItem[]): Promise<str
       pubDate: first.pubDate,
       content: first.contentHtml,
     } as any)
-    if (cover && isImagePathLike(cover)) return cover
+    if (cover && isImagePathLike(cover) && isSafeImageHost(cover)) return cover
   } catch {}
   return null
 }
@@ -400,7 +400,7 @@ async function runIngest(limit: number) {
       if (recentDupe) {
         const updates: Record<string, any> = {}
         if (!recentDupe.coverImage) {
-          const coverImageResolved = await resolveCoverHard(first, group)
+          let coverImageResolved = await resolveCoverHard(first, group)
           const catForFallback = recentDupe.category || 'drustvo'
           const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
@@ -430,7 +430,7 @@ async function runIngest(limit: number) {
       if (byLink) {
         const updates: Record<string, any> = {}
         if (!byLink.coverImage) {
-          const coverImageResolved = await resolveCoverHard(first, group)
+          let coverImageResolved = await resolveCoverHard(first, group)
           const catForFallback = byLink.category || 'drustvo'
           const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
@@ -464,7 +464,7 @@ async function runIngest(limit: number) {
       if (aiRecentDupe) {
         const updates: Record<string, any> = {}
         if (!aiRecentDupe.coverImage) {
-          const coverImageResolved = await resolveCoverHard(first, group)
+          let coverImageResolved = await resolveCoverHard(first, group)
           const catForFallback = aiRecentDupe.category || 'drustvo'
           const coverImage = coverImageResolved || `/cats/${catForFallback}.webp`
           if (coverImage) updates.coverImage = coverImage
@@ -492,7 +492,7 @@ async function runIngest(limit: number) {
       const category = classifyTitle(ai.title, ai.summary || ai.content)
 
       // Pokušaj da nađeš cover; ako nema – kategorijski fallback
-      const coverImageResolved = await resolveCoverHard(first, group)
+      let coverImageResolved = await resolveCoverHard(first, group)
       const coverImage = coverImageResolved || `/cats/${category}.webp`
 
       const publishedAt =

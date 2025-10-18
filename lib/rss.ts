@@ -2,6 +2,36 @@
 import Parser from 'rss-parser'
 
 /* ------------------------------------------------
+   0) Safe-image allow list (za filtriranje u ingest-u)
+------------------------------------------------- */
+
+// Domeni sa kojih je bezbedno posluživati cover fotke
+export const SAFE_IMAGE_HOSTS = new Set<string>([
+  // CC/PD
+  'upload.wikimedia.org',
+  'commons.wikimedia.org',
+
+  // Royalty-free
+  'images.unsplash.com',
+  'unsplash.com',
+  'images.pexels.com',
+  'pexels.com',
+  'cdn.pixabay.com',
+  'pixabay.com',
+
+  // Tvoj CDN (po potrebi promeni/dodaj)
+  'cdn.diaspora24h.com',
+])
+
+export function isSafeImageHost(u?: string | null) {
+  if (!u) return false
+  try {
+    const h = new URL(u).hostname
+    return SAFE_IMAGE_HOSTS.has(h)
+  } catch { return false }
+}
+
+/* ------------------------------------------------
    1) Tipovi kompatibilni sa postojećim kodom
 ------------------------------------------------- */
 
@@ -355,7 +385,7 @@ export async function collectFeedItems(urls: string[]): Promise<FeedItem[]> {
       const summary = (it.contentSnippet || '').trim() || null
       const plainText = stripHtml(contentHtml || summary || '')
 
-      // Pokušaj cover-a
+      // Pokušaj cover-a (sirovi rezultat; FILTER radiš u ingest-u pomoću isSafeImageHost)
       let coverImage: string | null = null
       try { coverImage = await resolveBestCover(it) } catch {}
 
