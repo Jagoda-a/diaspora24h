@@ -128,6 +128,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://pagead2.googlesyndication.com" crossOrigin="" />
         <link rel="preconnect" href="https://tpc.googlesyndication.com" crossOrigin="" />
 
+        {/* (NOVO) AdSense account meta — traži Google */}
+        {client ? <meta name="google-adsense-account" content={client} /> : null}
+
         {/* Funding Choices (CMP / GDPR) */}
         {fcSiteCode ? (
           <>
