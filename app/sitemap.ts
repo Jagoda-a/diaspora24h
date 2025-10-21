@@ -25,10 +25,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     '/vesti-u-srbiji',
     '/srbija-vesti',
     '/balkan-vesti',
-    '/dijaspora-vesti',
-    '/vesti-iz-srbije-za-dijasporu-u-nemackoj',
-    '/vesti-iz-srbije-za-dijasporu-u-austriji',
-    '/vesti-iz-srbije-za-dijasporu-u-svajcarskoj',
+    '/dijaspora-vesti'
   ]
   const seoPages: MetadataRoute.Sitemap = SEO_ROUTES.map((p) => ({
     url: `${base}${p}`,
