@@ -4,13 +4,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { CAT_KEYS, CAT_LABELS } from '@/lib/cats'
-import CoverUpload from '@/app/admin/ui/CoverUpload' // [DODATO] upload komponenta
+import CoverUpload from '@/app/admin/ui/CoverUpload'
 
 type Article = {
   id: string
   title: string
   slug: string
   summary: string
+  content: string // [DODATO] — ceo tekst članka
   coverImage?: string | null
   category?: string | null
   publishedAt?: string | null
@@ -34,7 +35,6 @@ export default function AdminEditArticlePage() {
   const [removing, setRemoving] = useState(false)
   const [toast, setToast] = useState<{ kind: 'ok'|'err', text: string } | null>(null)
 
-  // pamtimo prethodnu kategoriju da bismo revalidirali i staru i novu listu
   const prevCatRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -48,6 +48,7 @@ export default function AdminEditArticlePage() {
           title: data.title ?? '',
           slug: data.slug ?? '',
           summary: data.summary ?? '',
+          content: data.content ?? '',          // [DODATO]
           coverImage: data.coverImage ?? null,
           category: data.category ?? null,
           publishedAt: data.publishedAt ?? null,
@@ -78,6 +79,7 @@ export default function AdminEditArticlePage() {
         body: JSON.stringify({
           title: a.title,
           summary: a.summary,
+          content: a.content,            // [DODATO]
           coverImage: a.coverImage ?? null,
           category: a.category ?? null,
           publishedAt: a.publishedAt ?? null,
@@ -92,7 +94,6 @@ export default function AdminEditArticlePage() {
       const data = await res.json()
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'update_failed')
 
-      // posle uspeha revalidiramo: samu vest, listu vesti, i obe kategorije (staru i novu)
       const slug = a.slug
       const prevCat = prevCatRef.current
       const newCat  = a.category ?? null
@@ -111,9 +112,7 @@ export default function AdminEditArticlePage() {
         })
       }).catch(() => {})
 
-      // ažuriramo "prethodnu" kategoriju za sledeći save
       prevCatRef.current = newCat
-
       setToast({ kind: 'ok', text: 'Sačuvano.' })
     } catch (e: any) {
       setToast({ kind: 'err', text: e?.message || 'Greška pri čuvanju' })
@@ -161,6 +160,21 @@ export default function AdminEditArticlePage() {
         <textarea value={a.summary} onChange={e => setA({ ...a, summary: e.target.value })} style={{ ...styles.input, minHeight: 120 }} />
       </div>
 
+      {/* [NOVO] CELO TEKSTUALNO POLJE ZA CLANAK */}
+      <div style={{ display: 'grid', gap: 12 }}>
+        <label>Tekst članka (HTML ili plain — čuva se u {`article.content`})</label>
+        <textarea
+          value={a.content}
+          onChange={e => setA({ ...a, content: e.target.value })}
+          style={{ ...styles.input, minHeight: 420, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+          placeholder="Unesi ceo sadržaj članka…"
+        />
+        <p style={{ margin: 0, fontSize: 12, color: '#6b7280' }}>
+          Savet: ako lepiš plain tekst, frontend (toHtml) će ga korektno pretvoriti u paragraf(e).
+        </p>
+      </div>
+      {/* [/NOVO] */}
+
       <div style={{ display: 'grid', gap: 12 }}>
         <label>Cover slika (URL)</label>
         <input value={a.coverImage ?? ''} onChange={e => setA({ ...a, coverImage: e.target.value || null })} style={styles.input} />
@@ -168,7 +182,6 @@ export default function AdminEditArticlePage() {
           <img src={`/api/img?url=${encodeURIComponent(a.coverImage)}`} alt="" style={{ maxWidth: 520, height: 'auto', borderRadius: 10, border: '1px solid #eee' }} />
         ) : null}
 
-        {/* [DODATO] Upload sa uređaja – jedna slika služi i kao cover i kao ogImage */}
         <div style={{ display: 'grid', gap: 6 }}>
           <label>Upload sa uređaja</label>
           <CoverUpload
@@ -183,7 +196,6 @@ export default function AdminEditArticlePage() {
             </div>
           )}
         </div>
-        {/* [KRAJ DODATKA] */}
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>

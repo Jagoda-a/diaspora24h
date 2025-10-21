@@ -38,10 +38,7 @@ async function fetchPagePlainText(url: string): Promise<{ title?: string; text?:
       meta('og:title') ||
       html.match(/<title>([^<]+)<\/title>/i)?.[1]
 
-    // pokušaji za sliku
     let ogImg = meta('og:image') || meta('twitter:image') || meta('twitter:image:src')
-
-    // normalizuj putanju slike (//cdn…, /img…, bez protokola…)
     try {
       if (ogImg?.startsWith('//')) ogImg = 'https:' + ogImg
       else if (ogImg?.startsWith('/')) ogImg = new URL(ogImg, url).toString()
@@ -63,7 +60,7 @@ async function fetchPagePlainText(url: string): Promise<{ title?: string; text?:
   }
 }
 
-// GET /api/admin/article/[id]  → vrati ceo zapis
+// GET /api/admin/article/[id] – vrati ceo zapis (uklj. content)
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const a = await prisma.article.findUnique({
     where: { id: params.id },
@@ -74,17 +71,18 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   return NextResponse.json(a)
 }
 
-// PUT /api/admin/article/[id]  → update polja; opcionalno regeneriši summary; uključuje SEO polja
+// PUT /api/admin/article/[id] – update polja; opcionalno regeneriši summary; uključuje SEO + content
 type PutBody = {
   title?: string
   summary?: string
+  content?: string | null          // ⬅️ DODATO
   coverImage?: string | null
   category?: string | null
   publishedAt?: string | null
   language?: string
   regenerateSummary?: boolean
 
-  // SEO polja:
+  // SEO:
   seoTitle?: string | null
   seoDescription?: string | null
   ogImage?: string | null
@@ -105,10 +103,15 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
   let nextTitle = body.title ?? a.title
 
   if (body.regenerateSummary) {
-    // pokušaj rezime iz izvora: prvo RSS match, pa fallback na skrejp
     let plainText: string | undefined
+
+    // ako imamo content u body-ju, koristi njega kao izvor; inače probaj RSS/stranicu
+    if (typeof body.content === 'string' && body.content.trim().length > 0) {
+      plainText = stripHtml(body.content)
+    }
+
     try {
-      if (a.sourceUrl) {
+      if (!plainText && a.sourceUrl) {
         const feeds = await fetchFeeds(RS_SOURCES_RS)
         const all = feeds.flatMap(f => f.items ?? [])
         const item = all.find(it => {
@@ -123,8 +126,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         }
       }
     } catch {
-      // ignore i idi na page fetch
+      // ignore
     }
+
     if (!plainText && a.sourceUrl) {
       const page = await fetchPagePlainText(a.sourceUrl)
       nextTitle = nextTitle || page.title || a.title
@@ -138,7 +142,6 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
         language: body.language || a.language || 'sr',
       })
       nextSummary = ai.content?.trim() || nextSummary
-      // ako AI vrati naslov i nemaš custom title u body, možeš prihvatiti
       if (!body.title && ai.title) {
         nextTitle = ai.title.trim()
       }
@@ -148,6 +151,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
   const data: any = {
     title: nextTitle,
     summary: nextSummary,
+    content: body.content !== undefined ? (body.content ?? '') : a.content, // ⬅️ DODATO
     coverImage: body.coverImage === '' ? null : body.coverImage ?? a.coverImage,
     category: body.category === '' ? null : body.category ?? a.category,
   }
@@ -155,12 +159,11 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
   if (body.publishedAt !== undefined) {
     data.publishedAt = body.publishedAt ? new Date(body.publishedAt) : null
   }
-
   if (body.language) {
     data.language = body.language
   }
 
-  // --- SEO polja ---
+  // SEO polja
   if (body.seoTitle !== undefined) data.seoTitle = body.seoTitle || null
   if (body.seoDescription !== undefined) data.seoDescription = body.seoDescription || null
   if (body.ogImage !== undefined) data.ogImage = body.ogImage || null
@@ -173,12 +176,12 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       data,
     })
     return NextResponse.json({ ok: true })
-  } catch {
+  } catch (e) {
     return NextResponse.json({ ok: false, error: 'update_failed' }, { status: 400 })
   }
 }
 
-// DELETE /api/admin/article/[id]  → obriši vest
+// DELETE /api/admin/article/[id]
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   if (!isAuthed()) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })

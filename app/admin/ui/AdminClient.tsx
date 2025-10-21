@@ -1,11 +1,12 @@
 // app/admin/ui/AdminClient.tsx
 'use client'
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AdminList from './AdminList'
+import AdminBulkCategoryClient from './AdminBulkCategoryClient'
 
-type NavId = 'new' | 'edit' | 'backfill' | 'reclassify' | 'list'
+type NavId = 'new' | 'edit' | 'bulkcat' | 'list'
 
 /** Jednostavne monochrome ikonice (SVG, currentColor) */
 const IconPlus: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -19,15 +20,10 @@ const IconEdit: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     <path d="M16.5 3.5l4 4L8 20H4v-4L16.5 3.5z" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
-const IconPuzzle: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+const IconTags: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" {...props}>
-    <path d="M8 4h3a2 2 0 012 2v0a2 2 0 104 0h3v4a2 2 0 01-2 2h-1a2 2 0 100 4h1a2 2 0 012 2v4h-4a2 2 0 01-2-2v-1a2 2 0 10-4 0v1a2 2 0 01-2 2H4v-4a2 2 0 012-2h1a2 2 0 100-4H6a2 2 0 01-2-2V4h4z" strokeLinejoin="round"/>
-  </svg>
-)
-const IconRotate: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
-  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" fill="none" strokeWidth="2" {...props}>
-    <path d="M3 12a9 9 0 1 0 3-6.708" strokeLinecap="round"/>
-    <path d="M3 4v4h4" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M20 10l-8-8H6L4 4v6l8 8 8-8z" strokeLinejoin="round" />
+    <circle cx="7.5" cy="7.5" r="1.5" />
   </svg>
 )
 const IconList: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -42,28 +38,10 @@ const IconList: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 type IconType = React.ComponentType<React.SVGProps<SVGSVGElement>>
 
 const NAV: Array<{ id: NavId; title: string; Icon: IconType }> = [
-  { id: 'new',        title: 'Dodaj vest',     Icon: IconPlus },
-  { id: 'edit',       title: 'Uredi vest',     Icon: IconEdit },
-  { id: 'backfill',   title: 'Backfill',       Icon: IconPuzzle },
-  { id: 'reclassify', title: 'Reclassify',     Icon: IconRotate },
-  { id: 'list',       title: 'Lista vesti',    Icon: IconList },
-]
-
-// Putanje kategorija koje čistimo revalidate-om
-const CAT_PATHS = [
-  '/', '/vesti',
-  '/vesti/k/politika',
-  '/vesti/k/hronika',
-  '/vesti/k/sport',
-  '/vesti/k/ekonomija',
-  '/vesti/k/tehnologija',
-  '/vesti/k/kultura',
-  '/vesti/k/zdravlje',
-  '/vesti/k/lifestyle',
-  '/vesti/k/zanimljivosti',
-  '/vesti/k/svet',
-  '/vesti/k/region',
-  '/vesti/k/drustvo',
+  { id: 'new',     title: 'Dodaj vest',         Icon: IconPlus },
+  { id: 'edit',    title: 'Uredi vest',         Icon: IconEdit },
+  { id: 'bulkcat', title: 'Masovna kategorija', Icon: IconTags },
+  { id: 'list',    title: 'Lista vesti',        Icon: IconList },
 ]
 
 export default function AdminClient() {
@@ -108,144 +86,7 @@ export default function AdminClient() {
     }
   }
 
-  // ====== BACKFILL COVERS (postojeći) ======
-  const [adminToken, setAdminToken] = useState('')
-  const [bfLimit, setBfLimit] = useState(200)
-  const [bfOnlyMissing, setBfOnlyMissing] = useState(true)
-  const [bfForce, setBfForce] = useState(false)
-  const [bfDry, setBfDry] = useState(false)
-  const [busyBF, setBusyBF] = useState(false)
-
-  async function runBackfillCovers() {
-    setBusyBF(true)
-    try {
-      const p = new URLSearchParams()
-      p.set('limit', String(bfLimit))
-      if (bfDry) p.set('dryRun', '1')
-      if (!bfOnlyMissing) p.set('onlyMissing', '0')
-      if (bfForce) p.set('force', '1')
-      if (adminToken) p.set('token', adminToken)
-      const res = await fetch(`/api/admin/backfill-covers?${p.toString()}`, { cache: 'no-store' })
-      const data = await res.json()
-      if (!res.ok || !data?.ok) throw new Error(data?.error || 'backfill_failed')
-      setToast({ kind: 'ok', text: `Covers: checked ${data.checked ?? data.total ?? 0}, updated ${data.updated ?? 0}` })
-    } catch (e: any) {
-      setToast({ kind: 'err', text: e?.message || 'Greška u backfill covers' })
-    } finally {
-      setBusyBF(false)
-    }
-  }
-
-  // ====== BACKFILL CATEGORIES (legacy dugme) ======
-  const [busyCat, setBusyCat] = useState(false)
-  const [catLimit, setCatLimit] = useState(300)
-  const [catDry, setCatDry] = useState(false)
-
-  async function runBackfillCategories() {
-    setBusyCat(true)
-    try {
-      const p = new URLSearchParams()
-      p.set('limit', String(catLimit))
-      if (catDry) p.set('dryRun', '1')
-      if (adminToken) p.set('token', adminToken)
-      const res = await fetch(`/api/admin/backfill-categories?${p.toString()}`, { cache: 'no-store' })
-      const data = await res.json()
-      if (!res.ok || !data?.ok) throw new Error(data?.error || 'backfill_failed')
-      setToast({ kind: 'ok', text: `Kategorije: checked ${data.checked ?? 0}, updated ${data.updated ?? 0}` })
-    } catch (e: any) {
-      setToast({ kind: 'err', text: e?.message || 'Greška u backfill kategorijama' })
-    } finally {
-      setBusyCat(false)
-    }
-  }
-
-  // ====== RECLASSIFY (novo, koristi baš /api/admin/backfill-categories sa force=1) ======
-  const [rcToken, setRcToken] = useState('')     // BACKFILL_TOKEN (ako koristiš)
-  const [rcBatch, setRcBatch] = useState(250)    // 50–1000
-  const [rcForce, setRcForce] = useState(true)   // <<<<<<<<<< KLJUČNO
-  const [rcDry, setRcDry] = useState(false)
-  const [rcAutoRevalidate, setRcAutoRevalidate] = useState(true)
-  const [rcRunning, setRcRunning] = useState(false)
-  const [rcBatches, setRcBatches] = useState(0)
-  const [rcUpdatedTotal, setRcUpdatedTotal] = useState(0)
-  const [rcLastUpdated, setRcLastUpdated] = useState(0)
-  const [rcLog, setRcLog] = useState<string[]>([])
-  const rcCursorRef = useRef<string | null>(null)
-
-  async function rcRunOnce() {
-    const p = new URLSearchParams()
-    p.set('limit', String(rcBatch))
-    if (rcForce) p.set('force', '1')
-    if (rcDry) p.set('dryRun', '1')
-    if (rcToken) p.set('token', rcToken)
-    if (rcCursorRef.current) p.set('cursor', rcCursorRef.current)
-
-    const url = `/api/admin/backfill-categories?${p.toString()}`
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) {
-      const txt = await res.text().catch(() => `${res.status}`)
-      throw new Error(`API error: ${txt}`)
-    }
-    const data = await res.json()
-    if (!data?.ok) throw new Error('API response not ok')
-
-    rcCursorRef.current = data.done ? null : (data.cursor ?? null)
-    setRcUpdatedTotal(u => u + (data.updated || 0))
-    setRcBatches(b => b + 1)
-    setRcLastUpdated(data.updated || 0)
-    setRcLog(l => [
-      `#${String(rcBatches + 1).padStart(3, '0')}  checked=${data.checked}  updated=${data.updated}  cursor=${data.cursor ?? '∅'}  done=${data.done ? '✓' : '…'}`,
-      ...l,
-    ])
-    return !!data.done
-  }
-
-  const [rvBusy, setRvBusy] = useState(false)
-  async function runRevalidateAll() {
-    setRvBusy(true)
-    try {
-      const res = await fetch('/api/admin/revalidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: CAT_PATHS /*, tags: ['articles']*/ }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data?.ok) throw new Error(data?.error || 'revalidate_failed')
-      setToast({ kind: 'ok', text: 'Keš osvežen (revalidate).' })
-    } catch (e: any) {
-      setToast({ kind: 'err', text: e?.message || 'Greška pri revalidate' })
-    } finally {
-      setRvBusy(false)
-    }
-  }
-
-  async function rcRunAll() {
-    setRcRunning(true)
-    setRcBatches(0)
-    setRcUpdatedTotal(0)
-    setRcLastUpdated(0)
-    setRcLog([])
-    rcCursorRef.current = null
-    try {
-      for (let i = 0; i < 10000; i++) {
-        const done = await rcRunOnce()
-        if (done) break
-        await new Promise(r => setTimeout(r, 120))
-      }
-      if (rcAutoRevalidate) {
-        await runRevalidateAll()
-      }
-      setRcLog(l => ['💾 Gotovo — re-klasifikacija završena.', ...l])
-      setToast({ kind: 'ok', text: 'Reclassify završeno.' })
-    } catch (e: any) {
-      setRcLog(l => [`⚠️ Greška: ${e?.message || e}`, ...l])
-      setToast({ kind: 'err', text: e?.message || 'Greška u reclassify' })
-    } finally {
-      setRcRunning(false)
-    }
-  }
-
-  // ====== UI (neutralno; global.css vodi dark/light) ======
+  // ====== UI ======
   const styles = useMemo(() => ({
     shell: {
       display: 'grid',
@@ -305,42 +146,16 @@ export default function AdminClient() {
 
   return (
     <div style={styles.shell} data-admin-shell>
-      {/* Global za ikonice: uvek se boje po currentColor (dark/light) */}
       <style jsx>{`
         .nav-btn svg { stroke: currentColor !important; fill: none !important; }
-
-        /* MOBILNI: sidebar 30px, bez brenda i teksta; više prostora za main */
         @media (max-width: 900px) {
-          [data-admin-shell] {
-            grid-template-columns: 30px 1fr !important;
-          }
-          aside[data-admin-sidebar] {
-            padding: 6px 4px !important;
-            position: sticky;
-            top: 0;
-            z-index: 20;
-          }
-          .brand, .nav-text, .sidebar-note {
-            display: none !important;
-          }
-          .nav-btn {
-            justify-content: center !important;
-            padding: 6px 0 !important;
-            border-radius: 8px !important;
-          }
-          .nav-icon {
-            width: 18px;
-            height: 18px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-          }
-          main[data-admin-main] {
-            padding: 12px !important;
-          }
-          main[data-admin-main] .container {
-            margin: 0 4px;
-          }
+          [data-admin-shell] { grid-template-columns: 30px 1fr !important; }
+          aside[data-admin-sidebar] { padding: 6px 4px !important; position: sticky; top: 0; z-index: 20; }
+          .brand, .nav-text, .sidebar-note { display: none !important; }
+          .nav-btn { justify-content: center !important; padding: 6px 0 !important; border-radius: 8px !important; }
+          .nav-icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
+          main[data-admin-main] { padding: 12px !important; }
+          main[data-admin-main] .container { margin: 0 4px; }
         }
       `}</style>
 
@@ -417,190 +232,18 @@ export default function AdminClient() {
                   Editor se otvara na /admin/article/[id]. U “Listi vesti” klikni “Izmeni” za brži pristup.
                 </p>
               </div>
-
-              {/* Backfill prečica */}
-              <div style={styles.card}>
-                <h2 style={styles.h2}>Backfill brzi alati</h2>
-                <div style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <input
-                      placeholder="BACKFILL_TOKEN (opciono)"
-                      value={adminToken}
-                      onChange={e => setAdminToken(e.target.value)}
-                      style={{ ...styles.input, flex: 1, minWidth: 260 }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <button onClick={() => setActive('backfill')} style={styles.btn}>Otvori ceo Backfill panel</button>
-                  </div>
-                </div>
-              </div>
             </section>
           )}
 
-          {/* BACKFILL */}
-          {active === 'backfill' && (
+          {/* MASOVNA PROMENA KATEGORIJE */}
+          {active === 'bulkcat' && (
             <section style={{ display: 'grid', gap: 18 }}>
               <div style={styles.card}>
-                <h2 style={styles.h2}>Backfill Covers</h2>
-                <div style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <input
-                      placeholder="BACKFILL_TOKEN (opciono ovde, ili postavi u env)"
-                      value={adminToken}
-                      onChange={e => setAdminToken(e.target.value)}
-                      style={{ ...styles.input, flex: 1, minWidth: 260 }}
-                    />
-                    <input
-                      type="number"
-                      value={bfLimit}
-                      min={1}
-                      onChange={e => setBfLimit(parseInt(e.target.value || '1', 10))}
-                      style={{ ...styles.input, width: 110 }}
-                    />
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <label><input type="checkbox" checked={bfOnlyMissing} onChange={e => setBfOnlyMissing(e.target.checked)} /> Samo gde fali</label>
-                    <label><input type="checkbox" checked={bfForce} onChange={e => setBfForce(e.target.checked)} /> Force (prepiši postojeće)</label>
-                    <label><input type="checkbox" checked={bfDry} onChange={e => setBfDry(e.target.checked)} /> Dry run</label>
-                  </div>
-
-                  <div>
-                    <button onClick={runBackfillCovers} disabled={busyBF} style={styles.btnPrimary}>
-                      {busyBF ? 'Pokrećem…' : 'Pokreni backfill covers'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div style={styles.card}>
-                <h2 style={styles.h2}>Backfill Kategorije</h2>
-                <div style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <input
-                      type="number"
-                      value={catLimit}
-                      min={1}
-                      onChange={e => setCatLimit(parseInt(e.target.value || '1', 10))}
-                      style={{ ...styles.input, width: 110 }}
-                    />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input type="checkbox" checked={catDry} onChange={e => setCatDry(e.target.checked)} />
-                      Dry run
-                    </label>
-                  </div>
-
-                  <div>
-                    <button onClick={runBackfillCategories} disabled={busyCat} style={styles.btnPrimary}>
-                      {busyCat ? 'Pokrećem…' : 'Pokreni backfill kategorija'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ ...styles.card, borderStyle: 'dashed' }}>
-                <h3 style={{ margin: '0 0 8px 0' }}>Opasno</h3>
-                <p style={{ margin: '6px 0 12px 0', opacity: 0.7 }}>
-                  Obrisati sve vesti iz baze (nepovratno).
-                </p>
-                <button onClick={handleDeleteAll} style={styles.btnDangerSolid}>
-                  OBRIŠI SVE VESTI
-                </button>
-              </div>
-            </section>
-          )}
-
-          {/* RECLASSIFY */}
-          {active === 'reclassify' && (
-            <section style={{ display: 'grid', gap: 18 }}>
-              <div style={styles.card}>
-                <h2 style={styles.h2}>Reclassify (prepakuj kategorije)</h2>
+                <h2 style={styles.h2}>Masovna promena kategorije</h2>
                 <p style={{ marginTop: 0, color: 'var(--muted)' }}>
-                  Prolazi sve vesti u batch-evima i smešta ih u “pravu” kategoriju prema <code>lib/cats.ts</code>.
+                  Izaberi ciljnu kategoriju, čekiraj vesti i klikni Prebaci.
                 </p>
-
-                <div style={{ display: 'grid', gap: 10, maxWidth: 720 }}>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <input
-                      type="password"
-                      placeholder="BACKFILL_TOKEN (ako koristiš)"
-                      value={rcToken}
-                      onChange={e => setRcToken(e.target.value)}
-                      style={{ ...styles.input, flex: 1, minWidth: 260 }}
-                    />
-                    <input
-                      type="number"
-                      min={50}
-                      max={1000}
-                      value={rcBatch}
-                      onChange={e => setRcBatch(Math.max(50, Math.min(1000, parseInt(e.target.value || '250', 10))))}
-                      style={{ ...styles.input, width: 120 }}
-                      title="Veličina batch-a (50–1000)"
-                    />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input type="checkbox" checked={rcForce} onChange={e => setRcForce(e.target.checked)} />
-                      Force reclassify (prepiši postojeće ako su pogrešne)
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input type="checkbox" checked={rcDry} onChange={e => setRcDry(e.target.checked)} />
-                      Dry run (ne upisuj)
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <input type="checkbox" checked={rcAutoRevalidate} onChange={e => setRcAutoRevalidate(e.target.checked)} />
-                      Auto revalidate posle run-a
-                    </label>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button onClick={rcRunAll} disabled={rcRunning} style={styles.btnPrimary}>
-                      {rcRunning ? 'Radim…' : 'Reclassify sve'}
-                    </button>
-                    <button onClick={rcRunOnce} disabled={rcRunning} style={styles.btn}>
-                      Jedan batch
-                    </button>
-                    <button onClick={runRevalidateAll} disabled={rvBusy} style={styles.btn}>
-                      {rvBusy ? 'Keš…' : 'Osveži keš (revalidate)'}
-                    </button>
-                  </div>
-
-                  <div
-                    style={{
-                      padding: '10px 12px',
-                      border: '1px solid var(--border)',
-                      borderRadius: 10,
-                      background: 'var(--surface)',
-                      display: 'flex',
-                      gap: 16,
-                      flexWrap: 'wrap'
-                    }}
-                  >
-                    <div>Batch-eva: <b>{rcBatches}</b></div>
-                    <div>Ukupno ažurirano: <b>{rcUpdatedTotal}</b></div>
-                    <div>Zadnji batch (updated): <b>{rcLastUpdated}</b></div>
-                  </div>
-
-                  <div
-                    style={{
-                      border: '1px solid var(--border)',
-                      borderRadius: 10,
-                      background: 'var(--card)',
-                      padding: 12,
-                      minHeight: 160,
-                      maxHeight: 420,
-                      overflow: 'auto',
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                      fontSize: 13,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {rcLog.length === 0 ? (
-                      <div style={{ opacity: .6 }}>Log će se pojavljivati ovde…</div>
-                    ) : (
-                      rcLog.map((l, i) => <div key={i}>{l}</div>)
-                    )}
-                  </div>
-                </div>
+                <AdminBulkCategoryClient />
               </div>
             </section>
           )}

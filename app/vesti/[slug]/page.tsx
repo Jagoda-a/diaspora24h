@@ -57,7 +57,7 @@ function brandFromHost(host: string): string {
 
   // Sport
   if (h.endsWith('mondo.rs')) return 'Mondo';
-  if (h.endsWith('telegraf.rs')) return 'Telegraf'; // (ako zadržiš linkove ka Telegrafu)
+  if (h.endsWith('telegraf.rs')) return 'Telegraf';
 
   // Ostalo — vrati domen
   return h;
@@ -175,6 +175,15 @@ export default async function ArticlePage({ params }: Props) {
   const dt = article.publishedAt
     ? format(article.publishedAt, 'dd.MM.yyyy HH:mm', { locale: srLatn })
     : '';
+
+  // Byline: Datum · Redakcija Diaspora24h · SR
+  const byline = [
+    dt || null,
+    'Redakcija Diaspora24h',
+    article.language ? String(article.language).toUpperCase() : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const hasBody = !!(article.content && article.content.trim().length > 0);
   const content = hasBody ? article.content! : (article.summary || '');
@@ -364,8 +373,7 @@ export default async function ArticlePage({ params }: Props) {
               <h1 className="title">{article.title}</h1>
               {dek ? <p className="dek">{dek}</p> : null}
               <div className="meta">
-                {dt}
-                {article.language ? ` · ${String(article.language).toUpperCase()}` : ''}
+                {byline}
               </div>
 
               {/* SHARE — desno ispod opisa/meta */}

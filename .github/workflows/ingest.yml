@@ -1,8 +1,8 @@
-name: Ingest every 45 minutes
+name: Ingest every 3 hours
 
 on:
   schedule:
-    - cron: "0,45 * * * *"   # na svaku punu uru i u :45 (UTC)
+    - cron: "0 */3 * * *"   # na svaka 3 sata u :00 (UTC)
   workflow_dispatch:          # ručno pokretanje iz Actions taba
 
 jobs:
