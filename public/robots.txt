@@ -1,7 +1,24 @@
+# robots.txt — Diaspora24h
+
 User-agent: *
+# ZABRANI admin i većinu API ruta
 Disallow: /admin
 Disallow: /api/
-Allow: /
 
+# DOZVOLI image/OG proxije kroz API da Google može da preuzme slike i OG banere
+Allow: /api/img
+Allow: /api/imgx
+Allow: /api/og
+
+# Ne želimo da Google indeksira interne tehničke putanje
+Disallow: /_next/
+Allow: /_next/static/
+
+# (Opcionalno) Zabrani stranice pretrage i preview/draft stranice
+Disallow: /pretraga
+Disallow: /preview
+Disallow: /draft
+
+# Sitemape
 Sitemap: https://diaspora24h.com/sitemap.xml
 Sitemap: https://diaspora24h.com/news-sitemap.xml
