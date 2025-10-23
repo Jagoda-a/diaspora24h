@@ -4,10 +4,11 @@ import { useEffect, useRef } from 'react'
 type Props = {
   slot: string
   format?: string
+  layoutKey?: string               // NOVO: za "fluid" oglase
   style?: React.CSSProperties
 }
 
-export default function AdSlot({ slot, format = 'auto', style }: Props) {
+export default function AdSlot({ slot, format = 'auto', layoutKey, style }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const client = process.env.NEXT_PUBLIC_ADSENSE_CLIENT || ''
 
@@ -50,8 +51,8 @@ export default function AdSlot({ slot, format = 'auto', style }: Props) {
         data-ad-client={client}
         data-ad-slot={slot}
         data-ad-format={format}
+        {...(format === 'fluid' && layoutKey ? { 'data-ad-layout-key': layoutKey } : {})}
         data-full-width-responsive="true"
-        // test mod u dev okruženju (bez pravih impresija)
         data-adtest={process.env.NODE_ENV !== 'production' ? 'on' : undefined}
       />
     </div>

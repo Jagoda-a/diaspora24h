@@ -2,6 +2,8 @@
 import type { Metadata } from 'next'
 import { prisma } from '@/lib/db'
 import ArticleCard from '@/components/ArticleCard'
+import AdSlot from '@/components/AdSlot'
+import { Fragment } from 'react'
 
 export const dynamic = 'force-static'
 export const revalidate = 60
@@ -55,13 +57,43 @@ export default async function Home() {
     )
   }
 
+  const topSlot = process.env.NEXT_PUBLIC_ADS_TOP_SLOT || ''
+  const layoutKey = process.env.NEXT_PUBLIC_ADS_TOP_LAYOUT_KEY
+
   return (
     <div className="container" style={{ padding: 16 }}>
       <h1 className="sr-only">Najnovije vesti</h1>
-      {/* .articles-grid kao i do sada */}
+
+      {/* grid kartica (vesti + ad kartice) */}
       <div className="articles-grid">
-        {items.map((a) => (
-          <ArticleCard key={a.id} article={a as any} />
+        {items.map((a, i) => (
+          <Fragment key={a.id}>
+            <ArticleCard article={a as any} />
+
+            {/* ubaci oglas posle 4. kartice i zatim na svakih 10 kartica */}
+            {(i === 3 || (i > 3 && (i - 3) % 10 === 0)) && topSlot && (
+              <div
+                key={`ad-${i}`}
+                className="ad-card"
+                style={{
+                  borderRadius: 16,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  overflow: 'hidden',
+                  background: 'var(--card-bg, #fff)',
+                  padding: 12,
+                }}
+              >
+                {/* format=fluid + layoutKey ako ga koristiš za ovaj slot */}
+                <AdSlot
+                  slot={topSlot}
+                  format="fluid"
+                  layoutKey={layoutKey}
+                  style={{ display: 'block', width: '100%', minHeight: 120 }}
+                />
+              </div>
+            )}
+          </Fragment>
         ))}
       </div>
     </div>
