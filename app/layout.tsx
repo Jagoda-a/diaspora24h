@@ -6,6 +6,8 @@ import Header from '@/components/Header'
 import AdSlot from '@/components/AdSlot'
 import Footer from '@/components/Footer'
 import CookieBanner from '@/components/CookieBanner'
+import { Analytics } from '@vercel/analytics/react'
+import { SpeedInsights } from '@vercel/speed-insights/next' // opcionalno
 
 export const metadata: Metadata = {
   // baza za apsolutne URL-ove u metadata
@@ -234,6 +236,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             });
           `}
         </Script>
+
+        {/* Vercel Analytics (cookie-less) */}
+        <Analytics />
+        <SpeedInsights />
+        
       </body>
     </html>
   )
