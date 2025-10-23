@@ -200,11 +200,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Header */}
         <Header />
 
-        {/* Gornji oglas */}
-        <div className="container my-3">
-          <AdSlot slot="TOP_BANNER_SLOT_ID" />
-        </div>
-
         {/* Glavni sadržaj */}
         <main className="container">
           {children}
